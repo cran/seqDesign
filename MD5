@@ -1,0 +1,15 @@
+4cce0bf67c4b35a21f035a0725edd208 *DESCRIPTION
+81c252a2d439961b5007ab1922bdae89 *NAMESPACE
+785c10427f608dafa75f542132bdcf3c *R/seqDesign.R
+a355faf35936b6029439be2fe066752f *build/vignette.rds
+dd9ffab14cce53b62c284a91e7125136 *inst/doc/seqDesignInstructions.R
+7c3c9e43cbaedad7482d9e90742b12d0 *inst/doc/seqDesignInstructions.Rnw
+6dfb7b461cd6203628cc737bcc1026ee *inst/doc/seqDesignInstructions.pdf
+9d7771607db5303a81e2ec9d82b3d7bb *inst/doc/seqDesignSampleReport.pdf
+7f13dcd11454b56875fa20d5ac38bb9e *inst/extdata/seqDesignReport.Rnw
+28dccc59c300736f55d5bfb2437db40c *man/VEpowerPP.Rd
+386448690c5bcfeb801f66382e8cbbff *man/censTrial.Rd
+4bfabdad4ddbec7838a932313ae0ce66 *man/monitorTrial.Rd
+8d32a15443b3de38f3662715d4c682e0 *man/rankTrial.Rd
+3c5f66e16b9c9312198d0f1d2cfaf502 *man/simTrial.Rd
+7c3c9e43cbaedad7482d9e90742b12d0 *vignettes/seqDesignInstructions.Rnw

@@ -1,0 +1,125 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath, amsthm, amssymb}
+\usepackage[cp1250]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsfonts}
+\usepackage{multirow}
+\usepackage[round,authoryear]{natbib}
+\usepackage{lscape}
+\usepackage{float}
+\usepackage{array}
+\usepackage{subfig}
+\usepackage{epsfig, psfrag, graphicx, lscape}
+\textwidth=6.5in
+\textheight=8.4in
+\setlength{\topmargin}{0.21truein}
+\hoffset-18mm
+\usepackage{parskip}
+
+\begin{document}
+
+<<results='asis', echo=FALSE, warning=FALSE>>=
+rm(list=ls(all=TRUE))
+library(xtable)
+library(seqDesign)
+
+N.pla <- 1900
+N.vax <- 1100
+N.vax.arms <- 4
+srcDir <- "./"
+@
+
+<<results='asis', echo=FALSE>>=
+tableOutcomeProbs(srcDir, n.pla=N.pla, n.vax=N.vax)
+@
+
+\begin{figure}[H]
+\begin{center}
+<<echo=FALSE, fig.width=10, fig.height=7>>=
+plotOutcomeProbs(srcDir, n.pla=N.pla, n.vax=N.vax)
+@
+\caption{Probabilities of reaching each possible conclusion for a vaccine regimen}
+\end{center}
+\end{figure}
+
+\begin{figure}[H]
+\begin{center}
+<<echo=FALSE, fig.width=10, fig.height=7>>=
+plotPowerPP(srcDir, n.pla=N.pla, n.vax=N.vax)
+@
+\caption{Power curves to detect VE(6.5--18)$>0\%$ in per-protocol cohorts with a varying probability of a missing vaccination}
+\end{center}
+\end{figure}
+
+\newpage
+<<results='asis', echo=FALSE>>=
+tableNinfStage1NoMonitor(srcDir, n.pla=N.pla, n.vax=N.vax, nVaxArms=N.vax.arms)
+if (N.vax.arms>1){ tableNinfWithMonitor(srcDir, n.pla=N.pla, n.vax=N.vax, nVaxArms=N.vax.arms) }
+@
+
+\newpage
+<<results='asis', echo=FALSE>>=
+tableNinfPostM6WithMonitor(srcDir, n.pla=N.pla, n.vax=N.vax, maxNVaxArms=N.vax.arms, 
+                           infThroughWeek=78, pMissVax=0.05)
+tableNinfPostM6WithMonitor(srcDir, n.pla=N.pla, n.vax=N.vax, maxNVaxArms=N.vax.arms, 
+                           infThroughWeek=156, pMissVax=0.05)
+@
+
+\newpage
+<<results='asis', echo=FALSE>>=
+tableRankSelect(srcDir, n.pla=N.pla, n.vax=N.vax, nVaxArms=N.vax.arms,
+                aveVEsets=matrix(c(0,0,0,0.4,
+                                   0,0,0.3,0.4,
+                                   0.2,0.2,0.3,0.4,
+                                   0,0,0,0.6,
+                                   0,0,0.3,0.6,
+                                   0,0,0.45,0.6,
+                                   0.3,0.3,0.3,0.6,
+                                   0.3,0.3,0.45,0.6,
+                                   0.3,0.45,0.45,0.6), nrow=9, ncol=4, byrow=TRUE), type="head")
+tableRankSelect(srcDir, n.pla=N.pla, n.vax=N.vax, nVaxArms=N.vax.arms,
+                aveVEsets=matrix(c(0,0,0,0.4,
+                                   0,0,0.3,0.4,
+                                   0.2,0.2,0.3,0.4,
+                                   0,0,0,0.6,
+                                   0,0,0.3,0.6,
+                                   0,0,0.45,0.6,
+                                   0.3,0.3,0.3,0.6,
+                                   0.3,0.3,0.45,0.6,
+                                   0.3,0.45,0.45,0.6), nrow=9, ncol=4, byrow=TRUE), type="pool")
+@
+
+\newpage
+\begin{figure}[H]
+\begin{center}
+<<echo=FALSE, fig.width=10, fig.height=7>>=
+plotTrialDuration(srcDir, n.pla=N.pla, n.vax=N.vax, nVaxArms=1, 
+                  aveVE=c(0, seq(0.2,0.5,by=0.1)))
+@
+\caption{Duration of a vaccine regimen's evaluation ($n=$\Sexpr{N.pla} in the placebo arm and $n=$\Sexpr{N.vax} in the vaccine arm)}
+\end{center}
+\end{figure}
+
+<<results='asis', echo=FALSE, fig.width=10, fig.height=7>>=
+if (N.vax.arms>1){
+  AveVE <- as.list(NULL)
+  AveVE[[1]] <- matrix(c(0,0,0.4,0,0.4,0.4), nrow=3, ncol=2, byrow=TRUE)
+  AveVE[[2]] <- matrix(c(0,0,0,0.4,0,0,0.4,0.4,0,0.4,0.4,0.4), nrow=4, ncol=3, byrow=TRUE)
+  AveVE[[3]] <- matrix(c(0,0,0,0,0.4,0,0,0,0.4,0.4,0,0,0.4,0.4,0.4,0,0.4,0.4,0.4,0.4), nrow=5, ncol=4, byrow=TRUE)
+  AveVE <- AveVE[1:(N.vax.arms-1)]
+
+  for (i in 1:length(AveVE)){
+    cat("\\newpage")
+    cat("\\begin{figure}[H]")
+    cat("\\begin{center}")    
+    plotTrialDuration(srcDir, n.pla=N.pla, n.vax=N.vax, nVaxArms=i+1,
+                      aveVE=AveVE[[i]])
+    cat("\\caption{Total trial duration for the evaluation of ",i+1," vaccine regimens ($n=",N.vax,"$ per arm) versus one placebo arm ($n=",N.pla,"$)}", sep="")
+    cat("\\end{center}")
+    cat("\\end{figure}")
+  }
+}
+@
+
+\end{document}
