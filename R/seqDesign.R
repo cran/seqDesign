@@ -1118,10 +1118,10 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
   ## ordered correctly, and no dups in 'infectionTotals'
   ## (infectionTotals increasing)
   if (L > 1) {
-    if ( any( diff(infectionTotals) <= 0 ) ) 
+    if ( any( diff(infectionTotals) <= 0 ) ){
       stop("Argument 'infectionTotals' must be ordered by increasing",
            "magnitude.\n", "Please fix and retry.\n")
-    
+    }     
   }
   
   ## Make sure we have only two trt groups and that they're coded as 0 and 1
@@ -1806,118 +1806,108 @@ getHarmBound <- function(N,  ##Total number of infections desired for harm monit
   ## Storage for output of per.test.alpha and
   summ <- data.frame(alpha = per.test, totAlpha = NA)
   
-  for ( i in 1: length(per.test) )
+  ## We consider the total number of infected participants to be 'N' and
+  ## assume apriori and equal likelihood of infection for vaccinees as for
+  ## placebos.  So the number of infected vaccinees should follow a binomial
+  ## distribution with size N and probability p=null.p (where 'null.p' is 
+  ## the proportion of vaccinees in the trial).  We wish to have a total
+  ## probability of a "type I error" (stopping the trial for 'harm' when there
+  ## is no real difference between vaccine and placebo) of .05.  Our approach
+  ## will be to test for harm after each new infection, and we wish to find a
+  ## fixed 'alpha' value to use for each test, so that the overall prob. of a
+  ## false positive over the course of the trial is .05.
+  ##
+  ## To do this, we will iteratively choose a value alpha, generate a set of
+  ## 'stopping bounds' corresponding to that alpha, and then estimate the
+  ## overall type I error rate for those bounds.  We then go back and adjust
+  ## our alpha value (up or down) depending on whether our estimated type I
+  ## error is too high or too low.  Repeat until desired accuracy is obtained.
+  
+  bound <- NULL
+  
+  ## create data frame to store results in
+  bounds <- data.frame(totInfec=1:N, vaccInfecBound=NA, alphaLevelBound=NA,
+                       nextHigherAlphaLevel=NA, cutoff=NA )
+  
+  for (j in 1:nrow(bounds))
   {
-    ## We wish to monitor the number of HVTN 505 vaccinees that become
-    ## HIV infected relative to all HVTN 505 participants that become
-    ## HIV infected, to ensure that it doesn't become "too high".
-    ##
-    ## We consider the total number of infected participants to be 'N' and
-    ## assume apriori and equal likelihood of infection for vaccinees as for
-    ## placebos.  So the number of infected vaccinees should follow a binomial
-    ## distribution with size N and probability p=null.p (where 'null.p' is 
-    ## the proportion of vaccinees in the trial).  We wish to have a total
-    ## probability of a "type I error" (stopping the trial for 'harm' when there
-    ## is no real difference between vaccine and placebo) of .05.  Our approach
-    ## will be to test for harm after each new infection, and we wish to find a
-    ## fixed 'alpha' value to use for each test, so that the overall prob. of a
-    ## false positive over the course of the trial is .05.
-    ##
-    ## To do this, we will iteratively choose a value alpha, generate a set of
-    ## 'stopping bounds' corresponding to that alpha, and then estimate the
-    ## overall type I error rate for those bounds.  We then go back and adjust
-    ## our alpha value (up or down) depending on whether our estimated type I
-    ## error is too high or too low.  Repeat until desired accuracy is obtained.
+    totInfec <- bounds$totInfec[j]
     
-    bound <- NULL
+    alphaVal <- semiConstSpending( totInfec, alphaVals=c(0, per.test),
+                                   startHarmMonitor = harmMonitorRange)
     
-    ## create data frame to store results in
-    bounds <- data.frame(totInfec=1:N, vaccInfecBound=NA, alphaLevelBound=NA,
-                         nextHigherAlphaLevel=NA, cutoff=NA )
+    ## we don't need to do the next few steps unless alphaVal is > 0
+    if (alphaVal <= 0) next
     
-    for (j in 1:nrow(bounds))
+    ## choose the lowerBound for searching for the next cutoff value.
+    ## Under our framework it will always be the same as, or higher than
+    ## the cutoff from the previous (smaller) value of 'totInfec'
+    if ( is.null(bound) ) {
+      lowerBnd <- ceiling( null.p * totInfec )
+    } else lowerBnd <- bound
+    
+    # startVal <- min(totInfec, bound)
+    # lowerBnd <- startVal - 2
+    valSeq <- totInfec:lowerBnd
+    
+    upperTailProbs <- cumsum( dbinom(valSeq, totInfec, null.p) )
+    signif <- ( upperTailProbs <= alphaVal )
+    
+    ## if we have at least one significant value then do...
+    if ( isTRUE(signif[1]) )
     {
-      totInfec <- bounds$totInfec[j]
+      ## if we have all signif. values, then that's not good...
+      #if ( isTRUE( rev(signif)[1] ) )
+      #{
+      #    print( totInfec )
+      #    print( valSeq )
+      #    print( signif )
+      #    stop("Need to include more values in valSeq")
+      #}
       
-      alphaVal <- semiConstSpending( totInfec, alphaVals=c(0, per.test[i]),
-                                     startHarmMonitor = harmMonitorRange)
+      ## get "largest" (last) index for which signif == TRUE
+      largest.index <- max( which( signif ) )
       
-      ## we don't need to do the next few steps unless alphaVal is > 0
-      if (alphaVal <= 0) next
+      ## define 'bound' to be the infection count corresponding to
+      ## the 'largest.index' (i.e. the smallest infection count for
+      ## which we have significance at per-test-level 'alphaVal'
+      bound <- valSeq[ largest.index ]
       
-      ## choose the lowerBound for searching for the next cutoff value.
-      ## Under our framework it will always be the same as, or higher than
-      ## the cutoff from the previous (smaller) value of 'totInfec'
-      if ( is.null(bound) ) {
-        lowerBnd <- ceiling( null.p * totInfec )
-      } else lowerBnd <- bound
-      
-      # startVal <- min(totInfec, bound)
-      # lowerBnd <- startVal - 2
-      valSeq <- totInfec:lowerBnd
-      
-      upperTailProbs <- cumsum( dbinom(valSeq, totInfec, null.p) )
-      signif <- ( upperTailProbs <= alphaVal )
-      
-      ## if we have at least one significant value then do...
-      if ( isTRUE(signif[1]) )
-      {
-        ## if we have all signif. values, then that's not good...
-        #if ( isTRUE( rev(signif)[1] ) )
-        #{
-        #    print( totInfec )
-        #    print( valSeq )
-        #    print( signif )
-        #    stop("Need to include more values in valSeq")
-        #}
-        
-        ## get "largest" (last) index for which signif == TRUE
-        largest.index <- max( which( signif ) )
-        
-        ## define 'bound' to be the infection count corresponding to
-        ## the 'largest.index' (i.e. the smallest infection count for
-        ## which we have significance at per-test-level 'alphaVal'
-        bound <- valSeq[ largest.index ]
-        
-        bounds$vaccInfecBound[ j ] <- bound
-        bounds$alphaLevelBound[ j ] <- upperTailProbs[ largest.index ]
-        bounds$cutoff[ j ] <- alphaVal
-      }
-      
+      bounds$vaccInfecBound[ j ] <- bound
+      bounds$alphaLevelBound[ j ] <- upperTailProbs[ largest.index ]
+      bounds$cutoff[ j ] <- alphaVal
     }
     
-    out <- pNS(Bound=bounds$vaccInfecBound, p=null.p, N=N)
-    
-    names(out$Bounds)[ names(out$Bounds)=="StoppingBound" ] <- "Nvacc"
-    boundOut <- transform(out$Bounds, Nplac= n-Nvacc, RR=round(Nvacc/(n-Nvacc),digits=2))
-    boundOut <- cbind( boundOut, stopProb=round(out$Stop,4),
-                       cumStopProb=round(cumsum(out$Stop),4),
-                       alphaVal = bounds$cutoff )
-    
-    
-    ## Print out the stopping bounds that can actually be attained
-    
-    overall.alpha <- out$totalStopProb
-    
-    summ$totAlpha[ i ] <- overall.alpha
-    
-    out <- pNS(Bound=bounds$vaccInfecBound, p=null.p, N=N)
-    
-    
-    ## Add info on stopping probabilities to 'bounds' object
-    bounds[, "stoppingProb"] <- out$Stop
-    bounds[, "cumStoppingProb"] <- cumsum( bounds[, "stoppingProb"] )
-    
-    harmBounds =  boundOut
-    names(harmBounds)[1:3]=c("N", "V", "P") 
-    if (!is.null(dataDir)){
-      fileName <- fileNameFunc(round(per.test[i], 2), N, null.p)
-      write.csv(harmBounds, file.path(dataDir, fileName), row.names=FALSE)
-      cat("Output saved in:\n", file.path(dataDir, fileName), "\n\n")
-    } else {
-      return(harmBounds)
-    }    
   }
+  
+  out <- pNS(Bound=bounds$vaccInfecBound, p=null.p, N=N)
+  
+  names(out$Bounds)[ names(out$Bounds)=="StoppingBound" ] <- "Nvacc"
+  boundOut <- transform(out$Bounds, Nplac= n-Nvacc, RR=round(Nvacc/(n-Nvacc),digits=2))
+  boundOut <- cbind( boundOut, stopProb=round(out$Stop,4),
+                     cumStopProb=round(cumsum(out$Stop),4),
+                     alphaVal = bounds$cutoff )
+  
+  
+  overall.alpha <- out$totalStopProb
+  
+  summ$totAlpha <- overall.alpha
+  
+  out <- pNS(Bound=bounds$vaccInfecBound, p=null.p, N=N)
+  
+  
+  ## Add info on stopping probabilities to 'bounds' object
+  bounds[, "stoppingProb"] <- out$Stop
+  bounds[, "cumStoppingProb"] <- cumsum( bounds[, "stoppingProb"] )
+  
+  harmBounds =  boundOut
+  names(harmBounds)[1:3]=c("N", "V", "P") 
+  if (!is.null(dataDir)){
+    fileName <- fileNameFunc(round(per.test, 2), N, round(null.p, 2))
+    write.csv(harmBounds, file.path(dataDir, fileName), row.names=FALSE)
+    cat("Potential-harm stopping boundaries saved in:\n", file.path(dataDir, fileName), "\n\n")
+  }    
+  return(harmBounds)  
 }
 
 
@@ -2022,7 +2012,12 @@ if(VEmodel!="constant"){
 VEs <- vector("list", nVaccArms)
 
 for (ii in 1:nVaccArms) {
-  VEs[[ii]] = c(vaccEff[ii]/2, vaccEff[ii], aveVE[ii])
+  if (VEmodel=="half"){
+    VEs[[ii]] = c(vaccEff[ii]/2, vaccEff[ii], aveVE[ii])    
+  }
+  if (VEmodel=="constant"){
+    VEs[[ii]] = aveVE[ii]
+  }
 }
 names(VEs) <- paste("T", 1:length(vaccEff), sep="")
 
@@ -2040,8 +2035,14 @@ names(infecRateList) <- c("C1", names(VEs))
 infecRateList[[1]] <- data.frame( trt = "C1", start = 1, end = Inf, relRate = 1)
 for (ii in 2:nArms) {
   trtName <- names(VEs)[ii-1]
-  infecRateList[[ii]] <- data.frame( trt = trtName, start = vePeriods,
-                                     end = c(vePeriods[-1]-1, Inf), relRate = 1 - VEs[[trtName]] )
+  if (VEmodel=="half"){
+    infecRateList[[ii]] <- data.frame( trt = trtName, start = vePeriods,
+                                       end = c(vePeriods[-1]-1, Inf), relRate = 1 - VEs[[trtName]] )
+  }
+  if (VEmodel=="constant"){
+    infecRateList[[ii]] <- data.frame( trt = trtName, start = vePeriods,
+                                       end = Inf, relRate = 1 - VEs[[trtName]] )
+  }
 }
 infecRateTbl <- do.call(rbind, infecRateList)
 
@@ -2287,10 +2288,11 @@ monitorTrial = function(dataFile,
   pVaxPla <- trialObj$trtAssgnProbs[1:2]
   nVaxPla <- pVaxPla*nPpts
   null.p <- nVaxPla[2]/sum(nVaxPla)
+  names(null.p) <- NULL
   
   # calculate stopping boundaries for harm
   harmBounds <- getHarmBound(N=harmMonitorRange[2], per.test=alphaPerTest, harmMonitorRange=harmMonitorRange,
-                             null.p=null.p)
+                             null.p=null.p, dataDir=saveDir)
   
   ## creates a list of length 'nTrials' each element of which is a list of 
   ## length 'nTrtArms'
@@ -2377,8 +2379,9 @@ monitorTrial = function(dataFile,
       }
       
       # 'highN' are infection counts that trigger high-efficacy monitoring
-      highN.1 <- N1 + 4*nonEffInterval
-      highN <- c(highN.1, (highN.1 + sum(datIH.j$event))/2)
+      highN <- N1 + 4*nonEffInterval
+      highN.2 <- (highN + sum(datIH.j$event))/2
+      if (highN.2 > highN){ highN <- c(highN, highN.2) }
       
       ## Based on value of 'N1', extract bounds for efficacy, futility and harm
       ## then apply them
@@ -2443,15 +2446,15 @@ monitorTrial = function(dataFile,
       
       ## We only reach here if no harm bounds were hit
       
-      # if ( nrow(highEffBounds)!= 0 ) {  
+      # if ( nrow(highEffBounds)!= 0 ) { 
       highEffRes <- applyStopRules( 
         datIH.j,
         infectionTotals = highN,
         boundLabel = "HighEff",
         NullHR=nullHR, 
         HaHR = altHR, highHR = highHR, alpha=alpha, post6moCut=VEcutoffWeek, estimand=estimand)
-      
-      isHighEff = highEffRes$boundHit == "HighEff"
+      isHighEff <- highEffRes$boundHit == "HighEff"          
+      if (is.na(isHighEff)){ isHighEff <- FALSE }      
       # } 
       
       if ( isHighEff ) {
@@ -2493,6 +2496,8 @@ monitorTrial = function(dataFile,
       out[[i]][[j]] <- futRes
       
       out[[i]][[j]]$firstNonEffCnt <- N1
+      
+      out[[i]][[j]]$highEffCnt <- highN
       
       ## add 'lastExitTime' to the object, in case we have efficacy and
       ## the trial continues until the last person in the arm exits the study
@@ -2705,110 +2710,105 @@ censTrial <- function(dataFile,
     out <- monitorFile
     rm(monitorFile)
   }    
-
-  if (nTrtArms > 1) {
-    
-    ## multiple vaccine arms
-    
-    ## a matrix to store bounds results from monitoring each single arm
-    boundsRes = matrix(NA, ncol=nTrtArms, nrow = nTrials)
-    
-    ## an object to store the arm stop time when the arm stops (since trial starts), 
-    stopTime = matrix(NA, ncol=nTrtArms, nrow = nTrials)
-    
-    ## create a list to store the trial data that all subjects have been correctly
-    ## censored based on the monitoring results from all arms
-    trialListCensor <- vector("list", nTrials)
-    
-    for (i in 1:nTrtArms) {  
-      ## get the bounds 
-      boundsRes [, i]= unlist( lapply( out, function(x) x[[i]]$boundHit) )
-      stopTime [, i]= unlist( lapply( out, function(x) x[[i]]$stopTime) )
-    }
   
-    ## go through each trial
-    for (i in 1:nTrials ) {
+  ## a matrix to store bounds results from monitoring each single arm
+  boundsRes = matrix(NA, ncol=nTrtArms, nrow = nTrials)
+  
+  ## an object to store the arm stop time when the arm stops (since trial starts), 
+  stopTime = matrix(NA, ncol=nTrtArms, nrow = nTrials)
+  
+  ## create a list to store the trial data that all subjects have been correctly
+  ## censored based on the monitoring results from all arms
+  trialListCensor <- vector("list", nTrials)
+  
+  for (i in 1:nTrtArms) {  
+    ## get the bounds 
+    boundsRes [, i]= unlist( lapply( out, function(x) x[[i]]$boundHit) )
+    stopTime [, i]= unlist( lapply( out, function(x) x[[i]]$stopTime) )
+  }
+  
+  ## go through each trial
+  for (i in 1:nTrials ) {
+    
+    ## create a list to store censored data for ith trial
+    #trialCensorI = vector("list",nTrtArms+1 )
+    trialCensorI = NULL
+    
+    ## extract data for the i-th trial
+    datI <- trialObj[["trialData"]][[ i ]]
+    datI$futime <- datI$exit - datI$entry
+    
+    ## maximum possible trial duration  
+    trialStop = max(datI$exit)
+    
+    ## get the placebo arm
+    datI.0 = subset(datI, trt == 0)  
+    
+    ## if none of the arms are efficacy or highefficacy (i.e. all arms are either harm or noneff),
+    ## the entire trial stops when the last arm hits noneff/harm
+    if (!any(boundsRes[i,]%in%c("Eff", "HighEff"))) {
       
-      ## create a list to store censored data for ith trial
-      #trialCensorI = vector("list",nTrtArms+1 )
-      trialCensorI = NULL
+      ## get the time when the trial stops
+      trialStop = max(stopTime[i,])  
       
-      ## extract data for the i-th trial
-      datI <- trialObj[["trialData"]][[ i ]]
-      datI$futime <- datI$exit - datI$entry
-          
-      ## maximum possible trial duration  
-      trialStop = max(datI$exit)
+      ## censor the placebo arm        
+      datI.0$event = datI.0$event == 1 & (datI.0$exit <= trialStop)
+      datI.0$exit = pmin( datI.0$exit, trialStop)
+    }
+    ## if at least one arm reaches efficacy, placebo arm will continue follow up until stage 2
+    ## no need of extra action, store the censored placebo
+    trialCensorI = rbind(trialCensorI, datI.0)
+    
+    ## Now we move to censor the trt arms
+    for (j in 1:nTrtArms) {
       
-      ## get the placebo arm
-      datI.0 = subset(datI, trt == 0)  
+      ## subset jth trt arm
+      datI.j <- subset(datI, trt==j )
       
-      ## if none of the arms are efficacy or highefficacy (i.e. all arms are either harm or noneff),
-      ## the entire trial stops when the last arm hits noneff/harm
-      if (!any(boundsRes[i,]%in%c("Eff", "HighEff"))) {
+      ## censor the subjects based on bounds results for all arms
+      ## first, get the stop time for trial i arm j
+      t.j = stopTime[i, j]
+      
+      ## second, check if hit harm
+      if (boundsRes[i, j] %in% "Harm") {  ## if "Harm", stop
+        ## censor the trt arm        
+        datI.j$event = datI.j$event == 1 & (datI.j$exit <= t.j)
+        datI.j$exit = pmin( datI.j$exit, t.j)
         
-         ## get the time when the trial stops
-         trialStop = max(stopTime[i,])  
-       
-         ## censor the placebo arm        
-         datI.0$event = datI.0$event == 1 & (datI.0$exit <= trialStop)
-         datI.0$exit = pmin( datI.0$exit, trialStop)
-      }
-      ## if at least one arm reaches efficacy, placebo arm will continue follow up until stage 2
-      ## no need of extra action, store the censored placebo
-      trialCensorI = rbind(trialCensorI, datI.0)
-      
-      ## Now we move to censor the trt arms
-      for (j in 1:nTrtArms) {
-      
-         ## subset jth trt arm
-         datI.j <- subset(datI, trt==j )
-      
-         ## censor the subjects based on bounds results for all arms
-         ## first, get the stop time for trial i arm j
-         t.j = stopTime[i, j]
-      
-         ## second, check if hit harm
-         if (boundsRes[i, j]=="Harm") {  ## if "Harm", stop
-            ## censor the trt arm        
-            datI.j$event = datI.j$event == 1 & (datI.j$exit <= t.j)
-            datI.j$exit = pmin( datI.j$exit, t.j)
-            
-         } else { 
-            
-          if (boundsRes[i, j] %in% c("NonEffInterim", "NonEffFinal")) {  ## if hit the non efficacy bound
-            ## get the stop time for this arm, 
-            ## which is the end of stage 1 or when the last arm hits noneff/harm if no eff. trt arms
-            endStage1 = max(datI.j$entry + stage1)
-            trialStop = min (c(trialStop, endStage1))
+      } else { 
+        
+        if (boundsRes[i, j] %in% c("NonEffInterim", "NonEffFinal")) {  ## if hit the non efficacy bound
+          ## get the stop time for this arm, 
+          ## which is the end of stage 1 or when the last arm hits noneff/harm if no eff. trt arms
+          endStage1 = max(datI.j$entry + stage1)
+          trialStop = min (c(trialStop, endStage1))
           
-            ## censor the trt arm at 'trialStop'      
-            datI.j$event = datI.j$event == 1 & (datI.j$exit <= trialStop)
-            datI.j$exit = pmin( datI.j$exit, trialStop)                   
-            
-          } else { ## hit high eff or efficacy, i will remove this later
-            ## the arm will follow up to stage 2, no need of action
-          }      
-        }
+          ## censor the trt arm at 'trialStop'      
+          datI.j$event = datI.j$event == 1 & (datI.j$exit <= trialStop)
+          datI.j$exit = pmin( datI.j$exit, trialStop)                   
+          
+        } else { ## hit high eff or efficacy, i will remove this later
+          ## the arm will follow up to stage 2, no need of action
+        }      
+      }
       
-        ## store the censored trt arm
-        #trialCensorI [[j+1]] = datI.j
-        trialCensorI = rbind(trialCensorI, datI.j)                
-      }      
+      ## store the censored trt arm
+      #trialCensorI [[j+1]] = datI.j
+      trialCensorI = rbind(trialCensorI, datI.j)                
+    }      
     trialListCensor [[i]] = trialCensorI      
   }
-    
-    if (!is.null(saveDir)){
-      ## output newly censored data 
-      ## filename for censored trial data, it includes:  nTrtArms 1Vac, 2Vac, 3Vac,
-      saveFile <- paste("trialDataCens", substr(monitorFile, 13, nchar(monitorFile)), sep="")
-      ## save trial output and info on rates used
-      save(trialListCensor, file=file.path(saveDir, saveFile) )
-      cat("Trial data with correct censoring saved in:\n", file.path(saveDir, saveFile), "\n\n")
-    } else {
-      return(trialListCensor)
-    }     
-  }
+  
+  if (!is.null(saveDir)){
+    ## output newly censored data 
+    ## filename for censored trial data, it includes:  nTrtArms 1Vac, 2Vac, 3Vac,
+    saveFile <- paste("trialDataCens", substr(monitorFile, 13, nchar(monitorFile)), sep="")
+    ## save trial output and info on rates used
+    save(trialListCensor, file=file.path(saveDir, saveFile) )
+    cat("Trial data with correct censoring saved in:\n", file.path(saveDir, saveFile), "\n\n")
+  } else {
+    return(trialListCensor)
+  }  
 }
 
 
@@ -3062,30 +3062,30 @@ buildBounds = function(nInfec, highEffBounds) {
 }
 
 VEpowerPP <- function(dataList, VEcutoffWeek, stage1, alpha, outName=NULL, saveDir=NULL){
-  # output list (for each object from simTrial) of lists with components 'VE' and 'VEpwPP'
+  # output list (for each censTrial output object) of lists with components 'VE' and 'VEpwPP'
   pwList <- as.list(NULL)
   for (k in 1:length(dataList)){
     if (!is.null(saveDir)){
       # assumes 'dataList[[k]]' is a character string
       load(file.path(saveDir, dataList[[k]]))
-      dataList[[k]] <- trialObj
-      rm(trialObj)
+      dataList[[k]] <- trialListCensor
+      rm(trialListCensor)
     }
     
-    nTrials <- length(dataList[[k]]$trialData)
-    nPPcohorts <- length(grep("pp", colnames(dataList[[k]]$trialData[[1]])))
+    nTrials <- length(dataList[[k]])
+    nPPcohorts <- length(grep("pp", colnames(dataList[[k]][[1]])))
     if (nPPcohorts==0){ stop("Missing per-protocol cohort indicator in the data-set.") }
     ppnames <- paste0("pp", 1:nPPcohorts)
-        
+    
     VE <- matrix(NA, nrow=nTrials, ncol=nPPcohorts)
     VEpwPP <- matrix(NA, nrow=nTrials, ncol=nPPcohorts)
     for (i in 1:nTrials){
-      dataI <- dataList[[k]]$trialData[[i]]
+      dataI <- dataList[[k]][[i]]
       dataI$futime <- dataI$exit - dataI$entry
       # restrict to subjects with follow-up time exceeding 'VEcutoffWeek' weeks (per-protocol criterion 1)
       dataI <- subset(dataI, futime > VEcutoffWeek)
       # censor all subjects at the Week 'stage1' visit
-      dataI$event = dataI$event == 1 & (dataI$futime <= stage1)
+      dataI$event <- dataI$event == 1 & (dataI$futime <= stage1)
       dataI$futime <- pmin(dataI$futime, stage1)
       # shift the time origin to the Week 'VEcutoffWeek' visit
       dataI$futime <- dataI$futime - VEcutoffWeek      
@@ -3141,400 +3141,4 @@ VEpowerPP <- function(dataList, VEcutoffWeek, stage1, alpha, outName=NULL, saveD
   } else {
     return(pwList)
   }  
-}
-
-# generate a table of probabilities of reaching each possible trial outcome for a vaccine regimen
-tableOutcomeProbs <- function(dirname, n.pla, n.vax, aveVE.vector=c(-2, -1.5, -1, -0.5, 0, seq(0.2, 0.8, by=0.1))){
-  # generate a shell for the results
-  res <- as.data.frame(matrix(0, ncol=7, nrow=length(aveVE.vector)))
-  colnames(res) <- c("aveVE", "aveHR", "harm", "noneffInterim", "noneffFinal", "eff", "higheff")
-  res[,1] <- c(rep("--",4), paste(c(0,seq(20,80,by=10)),"%",sep=""))
-  res[,2] <- 1 - aveVE.vector
-  
-  # extract the proportions of trial outcomes from the output of monitorTrial()
-  row <- 0
-  for (aveVE in aveVE.vector){
-    row <- row + 1
-    filename <- paste("monitorTrial_nPlac=", n.pla, "_nVacc=", n.vax, "_aveVE=", aveVE, "_infRate=0.04_combined.RData", sep="")
-    load(file.path(dirname, filename))
-    bounds <- sapply(out, function(trial) trial[[1]]$boundHit)
-    bounds.freq <- table(bounds, exclude=NULL)/1000
-    res[row,3:7] <- bounds.freq[c("Harm","NonEffInterim","NonEffFinal","Eff","HighEff")]    
-    res[row,] <- ifelse(is.na(res[row,]), 0, res[row,])
-  }
-  res[,3:NCOL(res)] <- res[,3:NCOL(res)]*100
-  
-  res$noneff <- res$noneffInterim + res$noneffFinal
-  tableOutcomeProbs.filename <- paste("tableOutcomeProbs_nPlac=", n.pla, "_nVacc=", n.vax, "_infRate=0.04_combined.csv", sep="")
-  write.csv(res, file.path(dirname, tableOutcomeProbs.filename), quote=FALSE, row.names=FALSE)
-  outcomeProbsTable <- res[,c("aveVE","aveHR","harm","noneff","eff","higheff")]
-  colnames(outcomeProbsTable) <- c("Average VE(0-18)*", "Average HR(0-18)", "Potential-Harm VE(0-18)<0%", "Non-Efficacy VE(0-18)<40%", "Efficacy VE(0-18)>0%", "High-Efficacy VE(0-36)>60%")
-  
-  # prints the final table with proportions of trials reaching various outcomes
-  print(xtable(outcomeProbsTable, 
-               align=c("c",rep(c("p{0.7in}","p{1.05in}","p{0.95in}","p{1.05in}"),c(2,2,1,1))), 
-               digits=1, 
-               caption=paste("Probabilities ($\\times 100$) of reaching each possible conclusion for a study design with 1 vaccine arm with ",n.pla," placebo recipients and ",n.vax," vaccine recipients", sep="")
-  ), 
-        caption.placement="top", 
-        include.rownames=FALSE, 
-        hline.after=c(-1,-1,0,4), 
-        add.to.row=list(pos=list(12), command=paste0("\\hline \\hline \\multicolumn{6}{l}{{\\footnotesize $^{\\ast}$VE halved in the first 6 months}} \\\\\n \\multicolumn{6}{l}{\\footnotesize N=",n.pla,"/",n.vax," placebo/vaccine group} \\\\\n \\multicolumn{6}{l}{\\footnotesize 4\\% annual incidence in the placebo group} \\\\\n \\multicolumn{6}{l}{\\footnotesize 5\\% annual dropout} \\\\\n \\multicolumn{6}{l}{\\footnotesize Cox \\& cumulative incidence-based non-efficacy monitoring} \\\\\n \\multicolumn{6}{l}{\\footnotesize Cumulative hazard-based Wald test}"))
-  )
-}
-
-# generate a plot of probabilities of reaching each possible trial outcome for a vaccine regimen
-# 'data' is the .csv output from tableOutcomeProbs()
-plotOutcomeProbs <- function(dirname, n.pla, n.vax){
-  filename <- paste("tableOutcomeProbs_nPlac=", n.pla, "_nVacc=", n.vax, "_infRate=0.04_combined.csv", sep="")
-  fig.data <- read.csv(file.path(dirname, filename), header=TRUE)
-  fig.data <- fig.data[fig.data$aveHR<=1,]
-  
-  par(mar=c(4.5,5,3,1.5), las=1, cex.axis=1.2, cex.lab=1.3, cex.main=1.2)
-  plot(-1, 0, xlim=c(0,0.8), ylim=0:1, xaxt="n", yaxt="n", xlab="Average VE(0-18)", ylab="Probability")
-  axis(side=1, at=seq(0,0.8,by=0.1), labels=c("0%","",paste(seq(20,80,by=10),"%",sep="")))
-  axis(side=2, at=seq(0,1,by=0.2))
-  axis(side=4, at=seq(0,1,by=0.2), labels=FALSE)
-  abline(h=0.8, lty="dotted", lwd=2)
-  
-  with(fig.data, lines(1-aveHR, higheff/100, type="b", lwd=2, lty="dotdash", col="green"))
-  with(fig.data, lines(1-aveHR, harm/100, type="b", lwd=2, lty="dashed", col="darkred"))
-  with(fig.data, lines(1-aveHR, noneffInterim/100, type="b", lwd=2, lty="dotted", col="blue"))
-  with(fig.data, lines(1-aveHR, (noneffInterim + noneffFinal)/100, type="b", lwd=2, lty="longdash", col="purple"))
-  with(fig.data, lines(1-aveHR, (eff + higheff)/100, type="b", lwd=2, lty="solid", col="black"))
-  
-  text(0.1, 0.86, "Non-efficacy", adj=0, cex=1.1)
-  text(0.01, 0.54, "Weed out at\ninterim analysis", adj=0, cex=1.1)
-  text(0.13, 0.07, "Potential harm", adj=0, cex=1.1)
-  text(0.74, 0.2, "High\nefficacy", adj=0, cex=1.1)
-  text(0.23, 0.98, "Positive efficacy [Power for VE(0-18)]", adj=0, cex=1.1)
-  text(0.45, 0.6, 
-       paste("N=",n.pla,"/",n.vax," placebo/vaccine group\n4% annual incidence placebo\n5% annual dropout\nVE halved in first 6 months\nCox & cum inc-based non-eff monitoring\nCum hazard-based Wald test",
-             sep=""), 
-       adj=0, cex=1.1)    
-}
-
-plotPowerPP <- function(dirname, n.pla, n.vax, missVaccProb.vectorLength=4){
-  pwrPP.filename <- paste0("VEpwPP_nPlac=",n.pla,"_nVacc=",n.vax,"_infRate=0.04.RData")
-  load(file.path(dirname, pwrPP.filename))
-  
-  par(mar=c(4.5,5,3,1.5), las=1, cex.axis=1.2, cex.lab=1.3, cex.main=1.2)
-  plot(-1, 0, xlim=0:1, ylim=0:1, xaxt="n", yaxt="n", xlab="Cumulative VE(6.5-18) = [1-Cum Incidence Ratio]x100%", ylab="Probability",
-       main="Per-protocol efficacy [Power for cumulative VE(6.5-18) > 0%]")
-  axis(side=1, at=seq(0,1,by=0.1), labels=paste0(seq(0,100,by=10),"%"))
-  axis(side=2, at=seq(0,1,by=0.2))
-  axis(side=4, at=seq(0,1,by=0.2), labels=FALSE)
-  abline(h=0.8, lty="dotted", lwd=2)
-  abline(v=0.5, lty="dotted", lwd=2)
-  
-  colNames <- c("black", "darkred", "blue", "purple")
-  ltyNames <- c("solid", "dashed", "dotted", "longdash")
-  for (i in 1:missVaccProb.vectorLength){
-    x <- sapply(pwList, function(oneAveVEData){ oneAveVEData$VE[i] })
-    y <- sapply(pwList, function(oneAveVEData){ oneAveVEData$VEpwPP[i] })
-    lines(x, y, type="b", lty=ltyNames[i], lwd=2, col=colNames[i])
-  }
-  text(0.6, 0.15, 
-       paste0("N=",n.pla,"/",n.vax," MITT placebo/vaccine\n4% annual incidence placebo\n5% annual dropout\nVE halved in first 6 months\nCum hazard-based Wald test"), 
-       adj=0, cex=1.1)
-  legend(0, 0.7, lty=ltyNames, col=colNames, lwd=2, title="Missing Vaccination\nProbability",
-         legend=c("0% (MITT)",paste0(c(5,10,15),"%")), bty="n")
-}
-
-
-
-cumProbTrialDuration1VaxArm <- function(simTrial.filename, monitorTrial.filename, dirname, stage2=156){
-  load(file.path(dirname, simTrial.filename))
-  trialData <- trialObj[["trialData"]]
-  
-  load(file.path(dirname, monitorTrial.filename))
-  
-  bounds <- sapply(out, function(trial){ trial[[1]]$boundHit })
-  stopTimes <- sapply(out, function(trial){ trial[[1]]$stopTime })
-  for (i in 1:length(bounds)){
-    if (bounds[i] %in% c("Eff","HighEff")){
-      data.i <- trialData[[i]]
-      endStage2 <- max(data.i$entry + stage2)
-      trialStop <- min (max(data.i$exit), endStage2)
-      stopTimes[i] <- trialStop
-    }
-  }
-  return(quantile(stopTimes, prob=seq(0,1,by=0.01)))
-}
-
-cumProbTrialDuration <- function(trialDataCens.filename, dirname, stage2=156){
-  load(file.path(dirname, trialDataCens.filename))
-  
-  trialStopTime <- numeric(length(trialListCensor))
-  for (i in 1:length(trialListCensor)){
-    dataI <- trialListCensor[[i]]
-    trialStopTime[i] <- max(pmin(dataI$entry + stage2, dataI$exit))
-  }
-  return(quantile(trialStopTime, prob=seq(0,1,by=0.01)))
-}
-
-# if nVaxArms=1, then aveVE is a vector
-# if nVaxArms>1, then aveVE is a matrix with ncol=nVaxArms
-plotTrialDuration <- function(dirname, n.pla, n.vax, nVaxArms, aveVE=c(0, seq(0.2,0.5,by=0.1))){
-  if (nVaxArms==1){        
-    
-    # store the quantiles of the trial duration for every 'aveVE'
-    quantiles <- matrix(0, nrow=length(aveVE), ncol=length(seq(0,1,by=0.01)))
-    
-    if (!is.vector(aveVE)){ stop("The argument aveVE must be a vector when nVaxArms = 1.\n") }
-    for (i in 1:length(aveVE)){
-      simTrial.filename <- paste("simTrial_nPlac=",n.pla,"_nVacc=",n.vax,"_aveVE=",aveVE[i],"_infRate=0.04.RData",sep="")
-      monitorTrial.filename <- paste("monitorTrial_nPlac=",n.pla,"_nVacc=",n.vax,"_aveVE=",aveVE[i],"_infRate=0.04_combined.RData",sep="")
-      quantiles[i,] <- cumProbTrialDuration1VaxArm(simTrial.filename, monitorTrial.filename, dirname)
-    }
-    
-    # convert into months
-    quantiles <- quantiles/(52/12)
-    
-    par(mar=c(4.5,5,3,1.5), las=1, cex.axis=1.2, cex.lab=1.3, cex.main=1.2)
-    plot(-10, 0, xlim=c(0,54), ylim=0:1, xaxt="n", yaxt="n", 
-         xlab=paste(nVaxArms,"-Vaccine-Arm Trial Duration (Months)",sep=""), ylab="Cumulative Probability")
-    axis(side=1, at=c(0,seq(10,50,by=10),54))
-    axis(side=2, at=seq(0,1,by=0.2))
-    axis(side=4, at=seq(0,1,by=0.2), labels=FALSE)
-    segments(x0=18, y0=0, y1=0.5, lwd=2, col="gray30")
-    segments(x0=24, y0=0, y1=0.8, lwd=2, col="gray30")
-    
-    linesCol <- c("black", "blue", "red", "green", "gold")
-    for (i in 1:length(aveVE)){
-      lines(quantiles[i,], seq(0,1,by=0.01), lwd=2, col=linesCol[i])
-    }
-    
-    legend(x=0.5, y=0.975, legend=paste(aveVE*100,"%",sep=""), col=linesCol, lwd=2, 
-           cex=1.2, title="Average\nVE(0-18)", bty="n")
-    text(0, 0.2, 
-         paste("N=",n.pla,"/",n.vax," pla/vac\n4% annual incidence pla\n5% annual dropout\nVE halved in first 6 mo.\nCum haz-based Wald test",
-               sep=""), 
-         adj=0, cex=1.2)  
-    
-  } else {   
-    
-    # store the quantiles of the trial duration for every 'aveVE'
-    quantiles <- matrix(0, nrow=NROW(aveVE), ncol=length(seq(0,1,by=0.01)))
-    
-    if (!is.matrix(aveVE)){ stop("The argument aveVE must be a matrix when nVaxArms > 1.\n") }
-    for (i in 1:NROW(aveVE)){
-      trialDataCens.filename <- paste("trialDataCens_nPlac=",n.pla,"_nVacc=",paste(rep(n.vax,nVaxArms), collapse="_"),"_aveVE=",paste(aveVE[i,], collapse="_"),"_infRate=0.04_combined.RData",sep="")
-      quantiles[i,] <- cumProbTrialDuration(trialDataCens.filename, dirname)
-    }
-    
-    # convert into months
-    quantiles <- quantiles/(52/12)
-    
-    par(mar=c(4.5,5,3,1.5), las=1, cex.axis=1.2, cex.lab=1.3, cex.main=1.2)
-    plot(-10, 0, xlim=c(0,54), ylim=0:1, xaxt="n", yaxt="n", 
-         xlab=paste(nVaxArms,"-Vaccine-Arm Trial Duration (Months)",sep=""), ylab="Cumulative Probability")
-    axis(side=1, at=c(0,seq(10,50,by=10),54))
-    axis(side=2, at=seq(0,1,by=0.2))
-    axis(side=4, at=seq(0,1,by=0.2), labels=FALSE)
-    segments(x0=18, y0=0, y1=0.5, lwd=2, col="gray30")
-    segments(x0=24, y0=0, y1=0.8, lwd=2, col="gray30")
-    
-    linesCol <- c("black", "blue", "red", "green", "gold")[1:NROW(aveVE)]
-    for (i in 1:NROW(aveVE)){
-      lines(quantiles[i,], seq(0,1,by=0.01), lwd=2, col=linesCol[i])
-    }
-    
-    aveVEcomb <- NULL
-    for (i in 1:NROW(aveVE)){ aveVEcomb <- c(aveVEcomb,paste("(",paste(paste(aveVE[i,]*100, "%", sep=""), collapse=", "),")",sep="")) }
-    
-    legend(x=0.5, y=0.975, legend=aveVEcomb, col=linesCol, lwd=2, 
-           cex=1.2, title="Average\nVE(0-18)", bty="n")
-    text(0, 0.2, 
-         paste("N=",n.pla,"/",n.vax," pla/vac\n4% annual incidence pla\n5% annual dropout\nVE halved in first 6 mo.\nCox & cum inc-based non-eff\nCum haz-based Wald test",
-               sep=""), 
-         adj=0, cex=1.2)
-    
-  }
-  
-  text(x=18, y=0.4, labels="Accrual\ncompleted", cex=1.2, pos=2, adj=0)
-  text(x=24, y=0.75, labels="Vaccinations through\nmonth 6 completed", cex=1.2, pos=4, adj=0)  
-}
-
-tableNinfStage1NoMonitor <- function(dir.name, n.pla, n.vax, nVaxArms){
-  aveVE <- c(0, 0.4)
-  p <- c(0.01, 0.025, 0.05, seq(0.1,0.9,by=0.1), 0.95, 0.975, 0.99)
-  
-  res <- as.data.frame(matrix(0, nrow=length(aveVE), ncol=length(p)))
-  
-  for (i in 1:length(aveVE)){
-    simTrial.filename <- paste("simTrial_nPlac=",n.pla,"_nVacc=",paste(rep(n.vax,nVaxArms), collapse="_"),"_aveVE=",paste(rep(aveVE[i],nVaxArms), collapse="_"),"_infRate=0.04.RData",sep="")
-    load(file.path(dir.name, simTrial.filename))
-    Ninf <- sapply(trialObj$NinfStage1, function(vectInfbyTx){ vectInfbyTx[1] + max(vectInfbyTx[-1], na.rm=TRUE) })
-    res[i,] <- quantile(Ninf, prob=p)
-  }
-  
-  res <- round(res, 0)
-  res <- cbind(c("0%","40%"), res)
-  colnames(res) <- c("True VE (0-18)", paste(p*100,"%",sep=""))
-  return(print(xtable(res,
-                      digits=0,
-                      align=c("c","p{12mm}",rep("c",15)),
-                      caption=paste("Distribution of the number of Stage~1 infections pooled over the placebo group and the vaccine group with the maximum number of infections, ignoring sequential monitoring for potential-harm, non-efficacy, and high-efficacy (n=",n.pla," in the placebo arm and n=",n.vax," in each vaccine arm)",sep="")
-  ),
-               table.placement="H",
-               caption.placement="top",
-               include.rownames=FALSE,
-               include.colnames=FALSE,
-               scalebox=0.9,
-               hline.after=0,
-               add.to.row=list(pos=list(-1,0,NROW(res)), command=c("\\hline \\hline Ave VE & \\multicolumn{15}{c}{Percentiles of the distribution of the number of Stage 1 infections} \\\\\n","(0-18)$^{\\ast}$ & 1\\% & 2.5\\% & 5\\% & 10\\% & 20\\% & 30\\% & 40\\% & 50\\% & 60\\% & 70\\% & 80\\% & 90\\% & 95\\% & 97.5\\% & 99\\% \\\\\n",paste0("\\hline \\hline \\multicolumn{16}{l}{{\\footnotesize $^{\\ast}$VE halved in the first 6 months}} \\\\\n \\multicolumn{16}{l}{\\footnotesize N=",n.pla,"/",n.vax," placebo/vaccine group} \\\\\n \\multicolumn{16}{l}{\\footnotesize 4\\% annual incidence in the placebo group} \\\\\n \\multicolumn{16}{l}{\\footnotesize 5\\% annual dropout} \\\\\n \\multicolumn{16}{l}{\\footnotesize Cumulative hazard-based Wald test}")))
-  ))
-}
-
-tableNinfWithMonitor <- function(dir.name, n.pla, n.vax, nVaxArms){
-  if (nVaxArms==1){
-    return(tableNinfStage1NoMonitor(dir.name, n.pla, n.vax, nVaxArms=1))
-  } else {  
-    aveVE <- c(0, 0.4)
-    p <- c(0.01, 0.025, 0.05, seq(0.1,0.9,by=0.1), 0.95, 0.975, 0.99)
-    
-    res <- as.data.frame(matrix(0, nrow=length(2*aveVE), ncol=length(p)))
-    
-    for (j in 1:length(aveVE)){
-      #read in the censored data
-      trialDataCens.filename <- paste("trialDataCens_nPlac=",n.pla,"_nVacc=",paste(rep(n.vax,nVaxArms), collapse="_"),"_aveVE=",paste(rep(aveVE[j],nVaxArms), collapse="_"),"_infRate=0.04_combined.RData",sep="")
-      load(file.path(dir.name, trialDataCens.filename))
-      
-      # for each trial, create a vector of Stage 1 infection counts by treatment
-      infecList <- as.list(NULL)
-      for (i in 1:length(trialListCensor)){
-        dataI <- trialListCensor[[i]]
-        dataI$futime <- dataI$exit - dataI$entry
-        stage1ind <- dataI$event & dataI$futime<=78
-        infecList[[i]] <- as.vector( table( as.factor(dataI$trt)[stage1ind] ) )
-      }
-      
-      # for each trial, calculate the number of Stage 1 infections pooled over all treatment arms
-      Ninf.all <- sapply(infecList, function(vectInfbyTx){ sum(vectInfbyTx, na.rm=TRUE) })
-      
-      # for each trial, calculate the number of Stage 1 infections pooled over the placebo arm and the vaccine arm with
-      # the maximum number of infections
-      Ninf <- sapply(infecList, function(vectInfbyTx){ vectInfbyTx[1] + max(vectInfbyTx[-1], na.rm=TRUE) })
-      
-      res[j,] <- quantile(Ninf.all, prob=p)    
-      res[j+2,] <- quantile(Ninf, prob=p)
-    }
-    
-    res <- round(res, 0)
-    res <- cbind(rep(c("0%","40%"),2), res)
-    colnames(res) <- c("Average VE (0-18)", paste(p*100,"%",sep=""))
-    return(print(xtable(res,
-                        digits=0,
-                        align=c("c","p{12mm}",rep("c",15)),
-                        caption=paste("Distribution of the number of Stage 1 infections pooled over all ", N.vax.arms+1," groups or over the placebo group and the vaccine group with the maximum number of infections, accounting for sequential monitoring for potential-harm, non-efficacy, and high-efficacy (n=",n.pla," in the placebo arm and n=",n.vax," in each vaccine arm)",sep="")
-    ),
-                 table.placement="H",
-                 caption.placement="top",
-                 include.rownames=FALSE,
-                 include.colnames=FALSE,
-                 scalebox=0.9,
-                 hline.after=NULL,
-                 add.to.row=list(pos=list(-1,0,2,NROW(res)), command=c("\\hline \\hline Ave VE & \\multicolumn{15}{c}{Percentiles of the distribution of the number of Stage 1 infections} \\\\\n","(0-18)$^{\\ast}$ & 1\\% & 2.5\\% & 5\\% & 10\\% & 20\\% & 30\\% & 40\\% & 50\\% & 60\\% & 70\\% & 80\\% & 90\\% & 95\\% & 97.5\\% & 99\\% \\\\\n  \\hline & \\multicolumn{15}{c}{Total Stage 1 infections pooled over all vaccine groups and the placebo group} \\\\\n","\\hline & \\multicolumn{15}{c}{Stage 1 infections in the vaccine + placebo pair with the most infections} \\\\\n", paste0("\\hline \\hline \\multicolumn{16}{l}{{\\footnotesize $^{\\ast}$VE halved in the first 6 months}} \\\\\n \\multicolumn{16}{l}{\\footnotesize N=",n.pla,"/",n.vax," placebo/vaccine group} \\\\\n \\multicolumn{16}{l}{\\footnotesize 4\\% annual incidence in the placebo group} \\\\\n \\multicolumn{16}{l}{\\footnotesize 5\\% annual dropout} \\\\\n \\multicolumn{16}{l}{\\footnotesize Cox \\& cumulative incidence-based non-efficacy monitoring} \\\\\n \\multicolumn{16}{l}{\\footnotesize Cumulative hazard-based Wald test}")))
-    ))
-  }
-}
-
-# 'pMissVax' need to be 0, 0.05, 0.1, or 0.15
-tableNinfPostM6WithMonitor <- function(dir.name, n.pla, n.vax, maxNVaxArms, infThroughWeek=78, pMissVax=0.05){
-  if (!(pMissVax %in% seq(0,0.15,0.05))){ stop("'pMissVax' needs to be 0, 0.05, 0.1, or 0.15.\n") }
-  
-  aveVE <- 0.5
-  p <- c(0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99)
-  ppname <- paste0("pp",which(pMissVax==seq(0,0.15,0.05)))
-  
-  res <- as.data.frame(matrix(0, nrow=2*maxNVaxArms, ncol=length(p)+1))
-  
-  for (nVaxArms in 1:maxNVaxArms){
-    if (nVaxArms==1){
-      # if a single vaccine arm, read in original data from 'simTrial'
-      filename <- paste("simTrial_nPlac=",n.pla,"_nVacc=",n.vax,"_aveVE=",aveVE,"_infRate=0.04.RData",sep="")
-      load(file.path(dir.name, filename))
-      trialListCensor <- trialObj$trialData
-      rm(trialObj)
-    } else {
-      # otherwise read in the censored data obtained by 'sumTrial'
-      trialDataCens.filename <- paste("trialDataCens_nPlac=",n.pla,"_nVacc=",paste(rep(n.vax,nVaxArms), collapse="_"),"_aveVE=",paste(rep(aveVE,nVaxArms), collapse="_"),"_infRate=0.04_combined.RData",sep="")
-      load(file.path(dir.name, trialDataCens.filename))
-    }
-    
-    # for each trial, create a vector of Stage 1 infection counts by treatment
-    infecListMITT <- infecListPP <- as.list(NULL)
-    for (i in 1:length(trialListCensor)){
-      dataI <- trialListCensor[[i]]
-      dataI$futime <- dataI$exit - dataI$entry
-      infecListMITT[[i]] <- as.vector( table( as.factor(dataI$trt)[dataI$event & dataI$futime>26 & dataI$futime<=infThroughWeek] ) )
-      infecListPP[[i]] <- as.vector( table( as.factor(dataI$trt)[dataI[[ppname]]==1 & dataI$event & dataI$futime>26 & dataI$futime<=infThroughWeek] ) )
-    }
-    
-    # for each trial, calculate the number of infections diagnosed between 28-infThroughWeek weeks among vaccine recipients
-    NinfMITT <- sapply(infecListMITT, function(vectInfbyTx){ sum(vectInfbyTx[-1], na.rm=TRUE) })
-    NinfPP <- sapply(infecListPP, function(vectInfbyTx){ sum(vectInfbyTx[-1], na.rm=TRUE) })
-    
-    res[nVaxArms,1] <- mean(NinfMITT)
-    res[nVaxArms,-1] <- quantile(NinfMITT, prob=p)    
-    res[nVaxArms+maxNVaxArms,1] <- mean(NinfPP)
-    res[nVaxArms+maxNVaxArms,-1] <- quantile(NinfPP, prob=p)    
-  }
-  
-  res <- round(res, 0)
-  res <- cbind(rep(1:maxNVaxArms,2), res)
-  colnames(res) <- c("NVaxArms", "Mean", paste(p*100,"%",sep=""))
-  return(print(xtable(res,
-                      digits=0,
-                      align=c("c","l",rep("c",length(p)+1)),
-                      caption=paste("Distribution of the number of infections diagnosed between 6.5--", infThroughWeek*12/52, " months among vaccine recipients with immune response measured at Month 6.5 visit and hence used in the evaluation of an immunological correlate of risk, for vaccine regimens with average VE of 50\\%, halved in the initial 6 months ($n=",n.pla,"$ in the placebo arm, $n=",n.vax,"$ in each vaccine arm, and $p=",pMissVax,"$ the conditional probability of having missed a vaccination given HIV-negative and ongoing at the Month 6 [Week 26] visit).",sep="")
-  ),
-               table.placement="H",
-               caption.placement="top",
-               include.rownames=FALSE,
-               include.colnames=FALSE,
-               #scalebox=0.9,
-               hline.after=NULL,
-               add.to.row=list(pos=list(-1,0,maxNVaxArms,2*maxNVaxArms), command=c(paste("\\hline \\hline & & \\multicolumn{7}{c}{Percentiles of the distribution of} \\\\\n Number of & & \\multicolumn{7}{c}{the number of month 6.5--",infThroughWeek*12/52," infections} \\\\\n \\cline{3-9}",sep=""),paste("vaccine arms & Mean & 1\\% & 5\\% & 25\\% & 50\\% & 75\\% & 95\\% & 99\\% \\\\\n  \\hline & \\multicolumn{8}{c}{Month 6.5--",infThroughWeek*12/52," infections in the MITT cohort} \\\\\n",sep=""),paste("\\hline & \\multicolumn{8}{c}{Month 6.5--",infThroughWeek*12/52," infections in the per-protocol cohort} \\\\\n",sep=""),paste0("\\hline \\hline \\multicolumn{9}{l}{\\footnotesize N=",n.pla,"/",n.vax," MITT placebo/vaccine} \\\\\n \\multicolumn{9}{l}{\\footnotesize p=",pMissVax," probability of a missing vaccination} \\\\\n \\multicolumn{9}{l}{\\footnotesize 4\\% annual incidence in the placebo group} \\\\\n \\multicolumn{9}{l}{\\footnotesize 5\\% annual dropout} \\\\\n \\multicolumn{9}{l}{\\footnotesize Average VE=50\\%, halved VE in the first 6 months}")))
-  ))  
-}
-
-# 'type' is either "head" or "pool"
-tableRankSelect <- function(dirname, n.pla, n.vax, nVaxArms, aveVEsets, type="head"){
-  if (nVaxArms!=NCOL(aveVEsets)){ stop("Number of columns in aveVEsets needs to equal to ",nVaxArms,".\n") }
-  
-  rankSelectPwVector <- headPwVector <- NULL
-  for (i in 1:NROW(aveVEsets)){
-    rankSelectPwr.filename <- paste0("rankSelectPwr_nPlac=",n.pla,"_nVacc=",paste(rep(n.vax,nVaxArms), collapse="_"),"_aveVE=",paste(aveVEsets[i,], collapse="_"),"_infRate=0.04_combined.RData")
-    load(file.path(dirname, rankSelectPwr.filename))
-    
-    if (type=="head"){
-      rankSelectPwVector <- c(rankSelectPwVector, out$rankSelectPw*100)
-      headPwVector <- c(headPwVector, out$headHeadPw[1,1]*100) # power to detect positive relative VE(0-18) of Vx4 vs Vx3
-    }
-    if (type=="pool"){
-      rankSelectPwVector <- c(rankSelectPwVector, out$poolRankSelectPw*100)  # power to correctly identify the best pool
-      headPwVector <- c(headPwVector, out$poolHeadPw[1,1]*100) # power to detect positive relative VE(0-18) of Ve3-Vx4 vs Vx1-Vx2
-    }
-  }
-  aveVEchars <- apply(aveVEsets, 1, function(aveVE){ paste0("(",paste(aveVE*100,collapse=", "),")") })
-  nRows <- length(aveVEchars)
-  res <- data.frame(aveVEchars=aveVEchars, headPwVector=headPwVector, rankSelectPwVector=rankSelectPwVector)
-  return(print(xtable(res,
-                      digits=1,
-                      align=rep("c",4),
-                      caption=ifelse(type=="head",
-                                     "Power to detect that relative VE(0--18) $> 0\\%$ comparing head-to-head vaccine regimens 4 vs. 3 and VE(0--18) $> 0\\%$ for vaccine regimen 4, and probability of correct ranking and selection of the winning most efficacious vaccine regimen",
-                                     "Power to detect that relative VE(0--18) $> 0\\%$ comparing head-to-head pooled vaccine regimens 3--4 vs. 1--2 and VE(0--18) $> 0\\%$ for the pooled vaccine regimen 3--4, and probability of correct ranking and selection among the pooled pairs of the winning most efficacious regimen"
-                      )
-  ),
-               table.placement="H",
-               caption.placement="top",
-               include.rownames=FALSE,
-               include.colnames=FALSE,
-               #scalebox=0.9,
-               hline.after=0,
-               add.to.row=list(pos=list(-1,0,nRows), command=c("\\hline \\hline True average VE (\\%)$^1$ & Power ($\\times 100$) & Probability ($\\times 100$) \\\\\n",paste0("(Vx1, Vx2, Vx3, Vx4) & ",ifelse(type=="head","Vx4 vs. Vx3","Vx3-4 vs. Vx1-2"),"$^2$ & select best ",ifelse(type=="head","vaccine","pooled Vx"),"$^3$ \\\\\n"),paste0("\\hline\\hline \\multicolumn{3}{l}{\\footnotesize $^1$ VE halved in the first 6 months} \\\\\n \\multicolumn{3}{l}{\\footnotesize $^2$ Cumulative hazard-based Wald tests of both ",ifelse(type=="head","Vx4/Vx3","Vx3-4/Vx1-2")," and} \\\\\n \\multicolumn{3}{l}{\\footnotesize \\; \\,",ifelse(type=="head","Vx4/Placebo","Vx3-4/Placebo")," VE(0--18) with 1-sided $\\alpha=0.025$} \\\\\n \\multicolumn{3}{l}{\\footnotesize $^3$ Correct selection $=$ ",ifelse(type=="head","Vx4","pooled Vx3-4")," has highest estimated VE(0--36) and} \\\\\n \\multicolumn{3}{l}{\\footnotesize \\; \\, VE(0--18) significantly $>0\\%$} \\\\\n \\multicolumn{3}{l}{\\footnotesize N=",n.pla,"/",n.vax," placebo/vaccine group} \\\\\n \\multicolumn{3}{l}{\\footnotesize 4\\% annual incidence in the placebo group} \\\\\n \\multicolumn{3}{l}{\\footnotesize 5\\% annual dropout} \\\\\n \\multicolumn{3}{l}{\\footnotesize Cox \\& cumulative incidence-based non-efficacy monitoring}")))
-  ))  
 }

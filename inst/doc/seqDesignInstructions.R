@@ -12,7 +12,7 @@
 ###################################################
 ### code chunk number 2: seqDesignInstructions.Rnw:38-106 (eval = FALSE)
 ###################################################
-## aveVElist <- list(-2, -1.5, -1, 0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
+## aveVElist <- list(-2, -1.5, -1, -0.5, 0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
 ## aveVElist[12:19] <- lapply(aveVElist[-(1:3)], function(aveVE){ rep(aveVE, 4) })
 ## aveVElist[[20]] <- rep(0.5, 2)
 ## aveVElist[[21]] <- rep(0.5, 3)
@@ -41,7 +41,7 @@
 ##            VEmodel="half", vePeriods=c(1, 27, 79), enrollPeriod=78, enrollPartial=13, 
 ##            enrollPartialRelRate=0.5, dropoutRate=0.05, infecRate=0.04, fuTime=156, 
 ##            visitSchedule=c(0, (13/3)*(1:4), seq(13*6/3, 156, by=13*2/3)), 
-##            missVaccProb=c(0,0.05,0.1,0.15), VEcutoffWeek=26, nTrials=30, 
+##            missVaccProb=c(0,0.05,0.1,0.15), VEcutoffWeek=26, nTrials=1000, 
 ##            stage1=78, saveDir="./", randomSeed=300)
 ##   
 ##   monitorTrial(dataFile=
