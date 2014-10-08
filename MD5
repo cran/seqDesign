@@ -1,7 +1,7 @@
-1bd754588af5cddfbf30bffb195e25c8 *DESCRIPTION
+21281d45970e1bd8d26709e93fd3f4b1 *DESCRIPTION
 81c252a2d439961b5007ab1922bdae89 *NAMESPACE
-9d7c74dc119a74e70960435258d113c0 *R/seqDesign.R
-e23c370c301a84ba3772f6c5306de632 *build/vignette.rds
+e201832c86f27b3cc94ddf1abd5337e6 *R/seqDesign.R
+d877aa0f59da505aa290cf44563e1dff *build/vignette.rds
 036b25fd6585711334ecd7b47ac63a09 *inst/doc/seqDesignInstructions.R
 49945eb07d4a04cef671392600a34eb7 *inst/doc/seqDesignInstructions.Rnw
 cb8d77e306231c6bec6b20b006995bfe *inst/doc/seqDesignInstructions.pdf

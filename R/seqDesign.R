@@ -942,7 +942,7 @@ simFullEDIdata <-
     nTrt <- length(trtAssignProb)
     
     trtAssignments <- getTreatmentAssignment(N, prob = trtAssignProb, 
-                                             blockSize = ifelse(nTrt>3, ifelse(nTrt==4, 42, 51), 10*nTrt) )
+                                             blockSize = 10*nTrt )
     
     ## generate infection data for the 'N' participants
     infect <- getInfection(N, baseRate=rateParams$infecRate, 
@@ -1421,7 +1421,11 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
           } else {
             wald.stat <- (na.1 - na.0)/sqrt(varna.1 + varna.0)
             wald.pval <- pnorm(wald.stat)
-            if (wald.pval < alpha){ bound <- "Eff" } else { bound <- "NonEffFinal" }
+            if (is.na(wald.pval)){ 
+              bound <- NA
+            } else {
+              if (wald.pval < alpha){ bound <- "Eff" } else { bound <- "NonEffFinal" }
+            }            
           }
         }  
       } else {  ## Not final test 
@@ -1976,7 +1980,7 @@ parSet <- list(enrollment=enrollRate, dropout=dropoutRate/52, infection=infecRat
 ## 'enrollSchedule' contains information on enrollment periods and corresponding enrollment rates  
 ## 'enrollSchedule' is passed as an argument to the 'simFullEDIdata' function
 ## partial enrollment within 'enrollPartial' weeks; full enrollment thereafter until the end of week 'enrollPeriod'
-enrollSchedule <- data.frame(start = c(1, enrollPartial+1), end = c(enrollPartial,NA), relativeRates=c(enrollPartialRelRate, 1))
+enrollSchedule <- data.frame(start = c(1, enrollPartial+1), end = c(enrollPartial,NA), relativeRate=c(enrollPartialRelRate, 1))
 
 if(VEmodel!="constant"){
    ## 'vaccEff' is a vector of true *full* VEs for each treatment (defined as a function of 'aveVE')
@@ -2165,7 +2169,7 @@ trialObj <- list( trialData = trialList,
 
   # save trial output and information on used rates
   if (!is.null(saveDir)){
-    saveFile <- paste("simTrial_nPlac=", N[1], "_nVacc=", paste(N[-1], collapse="_"), "_aveVE=", paste(aveVE, collapse="_"), "_infRate=", infecRate,".RData", sep="")
+    saveFile <- paste("simTrial_nPlac=", N[1], "_nVacc=", paste(N[-1], collapse="_"), "_aveVE=", paste(round(aveVE,2), collapse="_"), "_infRate=", infecRate,".RData", sep="")
     save(trialObj, file=file.path(saveDir, saveFile))
     cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n")
   } else {
