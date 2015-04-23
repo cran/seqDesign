@@ -476,8 +476,6 @@ getDropout <- function(N, rate)
   generateDropout(N, rate)
 }
 
-
-
 getInfection <- function(N, baseRate, relRates=NULL, trtAssgn=NULL)
 {
   #infecRateTbl <- data.frame( trt     = c("C1", "T1", "T1"),
@@ -547,13 +545,98 @@ getInfection <- function(N, baseRate, relRates=NULL, trtAssgn=NULL)
 }
 
 
-
-## NOTE:  The treatment assignment code below was substitute in on July 15, 2011
-##        and is the same code found in 'newRand.R'.  The code that was previously
-##        used here has been placed in file 'oldRand.R'.   The new code allows
-##        block randomization whereas the old code did not. 
+## Function to compute the Greatest Common Divisor of a set of integers
+## (used by function getBlockSize() )
 ##
-##        Thank You - The Management
+##  Arguments:  
+##      nvec:  a vector of integers
+##             The argument value need not be of type integer - it will be coerced
+##             to integer internally
+##             
+##  Return Value:
+##      the greatest common divisor (integer)
+##
+gcd <- function(nvec) {
+
+    nComp <- length(nvec)
+    ## Ensure that nvec has at least 2 components
+    if ( nComp < 2 )
+        stop("Error(gcd): Argument 'nvec' must have length >= 2\n")
+
+    ## ensure that the input vector contains only integers
+    if ( any( abs(round(nvec) - nvec) > sqrt(.Machine$double.eps)) )
+        stop("Error(gcd): Non-integer values found in input vector\n")
+
+    ## coerce to integer (to avoid dealing with numerical fuzz in comparisons
+    nvec <- as.integer( round(nvec) )
+
+    ## Defines a recursive function that computes the gcd of a pair of integers
+    ## (taken off an R-mailing list post).
+    gcd2 <- function(a,b) ifelse(b==0, a, gcd2(b, a %% b) )
+
+    ## get pairwise gcd between current gcd and the next component
+    for (i in 1:(nComp-1)) {
+        nvec[i+1] <- gcd2(nvec[i], nvec[i+1])
+    }
+    nvec[ nComp ]
+}
+
+
+## getBlockSize:  
+## A function that computes possible block sizes to use in a blocked randomization.
+## It either reports the minimum possible block size (any multiple of it also is
+## a usable value), or the smallest block size that falls within a given range
+## (e.g. [10, 30] ) if the user provides a value via the 'range' argument.
+## If 'range' is specified and there is no block size within that range, the function
+## returns NA.
+##
+##  Arguments:  
+##      nvec:  a vector of counts of ppt.s allocated to various treatment arms
+##     range:  a length 2 integer vector of form [min, max] that gives the 
+##             upper and lower bounds of a region of values to consider for the
+##             blockSize of a randomization (the bounds are considered part of the
+##             region).  If 'range' is specified then the function returns the
+##             smallest multiple of the minimum block size that lies in the region
+##             (if any) - or NA if none do.
+##             
+getBlockSize <- function(nvec, range=c(0,Inf)) {
+
+    minBlk <- sum( round(nvec) / gcd(nvec) )
+
+    ## if 'range' was specified by user do some checking on the value
+    if ( !missing(range) ) {
+      if (length(range) != 2)
+          stop("Error(getBlockSize): The 'range' parameter must be a vector",
+               " of length 2\n")
+
+      if (is.infinite(range[1]))
+          stop("Error(getBlockSize): The first value of the 'range' vector is",
+               " infinite - this is not allowed\n")
+
+      if ( range[2] < range[1] )
+          stop("Error(getBlockSize): The first value of the 'range' vector must",
+               " be less-than-or-equal-to the second value\n")
+
+      ## If the range minimum was set to less than 1, reset to 1.  The blockSize
+      ## must be an integer and a value below 1 is nonsensical
+      if (range[1] < 1 )  range[1] <- 1
+
+      ## Minimum multiple of minBlk needed to meet/exceed the minimum range value
+      minMult <- ceiling(range[1]/minBlk)
+      ## Maximum multiple of minBlk usable to meet/fall-below the maximum range value
+      maxMult <-   floor(range[2]/minBlk)
+
+      ## if the minimum is larger than the maximum, then no value lies in the range
+      if ( minMult > maxMult )
+        return (NA)
+      else
+        return ( minMult * minBlk )
+    } else {
+        ## if range was not specified
+        return (minBlk)
+    }
+}
+
 
 ## Treatment assignment ties in with infection, since infections rates
 ## will vary across treatments - unless all are equally (in)effective.
@@ -601,7 +684,6 @@ getTreatmentAssignment <-
     ##   Treatment codes are 1, 2, ..., length(prob), with integer i representing
     ##   treatment with assignment probability of prob[i]
     
-    
     ##
     if ( !is.null(blockSize) ) 
       useBlock <- TRUE
@@ -620,22 +702,40 @@ getTreatmentAssignment <-
              "set to one of: ('fixed', 'random')\n") 
     }
     
-    
     ## set seed if user provided one
     if ( !is.null(seed) && is.numeric(seed) ) 
       set.seed(seed)
-    
     
     ## if block randomization chosen, do this:
     if ( useBlock ) {
       
       ## the argument 'prob' takes precedence if both it and nPerTrt were given
       if ( useProb ) {  
+
         ## number of each trt group in each block
         nPerBlock <- round( blockSize * prob )
-        if ( sum( nPerBlock ) != blockSize ) 
-          stop("The given values of 'prob' and 'blockSize' are",
-               "not compatible\n")
+
+        ## Verify that the 'blockSize' specified is compatible with the treatment
+        ## prob.s given by 'prob'
+        if ( sum( nPerBlock ) != blockSize ) {
+          stop("\n  The given value of blockSize, ", blockSize,
+               ", is not compatible with the specified treatment\n",
+               "distribution.  Please use function 'getBlockSize' ",
+               "to determine a suitable\n block size (see ",
+               "help(getBlockSize) ), and then re-run\n\n")
+        }
+
+        ## We allow user to use a poor block size if they really want to (may be
+        ## necessary in odd cases?), but issue a warning about it
+        if ( max( abs( nPerBlock/sum(nPerBlock) - prob ) > sqrt(.Machine$double.eps) )) {
+           warning(
+             "\n  The given value of blockSize, ", blockSize,
+             ", is not compatible with the value\n",
+             "of argument 'prob'.  Blocks of the specified size cannot create a\n",
+             "treatment distribution that matches 'probs'.  We suggest using\n",
+             "function 'getBlockSize' to determine a suitable block size and then\n",
+             "re-running (see help(getBlockSize))\n\n", immediate=TRUE)
+        } 
       } else {
         if ( useNPT ) {  
           if ( sum(useNPT) != blockSize )
@@ -884,7 +984,7 @@ simulateObservedEDIdata <-
 
 ## For simulating a certain amount of data from the beginning of a trial
 simFullEDIdata <-
-  function(rateParams, trtAssignProb, infecRates, protocolVisits,
+  function(rateParams, trtAssignProb, blockSize, infecRates, protocolVisits,
            enrollPeriod, startWeek=1, 
            nEnroll=NULL, nWeeksEnroll=NULL, maxEnrollment=NULL,
            nWeeksFU=NULL, nWeeksTrialTime=NULL)
@@ -942,7 +1042,7 @@ simFullEDIdata <-
     nTrt <- length(trtAssignProb)
     
     trtAssignments <- getTreatmentAssignment(N, prob = trtAssignProb, 
-                                             blockSize = 10*nTrt )
+                                             blockSize = blockSize )
     
     ## generate infection data for the 'N' participants
     infect <- getInfection(N, baseRate=rateParams$infecRate, 
@@ -1072,8 +1172,8 @@ summInterimData <- function( obsEDI )
       "nInfected =", nInfected, "\n")
 }
 
-applyStopRules<- function(d, infectionTotals, boundLabel="highEff", 
-                          HaHR = 0.60, NullHR=1, highHR=0.4, alpha=0.025, post6moCut=26, estimand) {
+applyStopRules <- function(d, infectionTotals, boundLabel="highEff", lowerHRnoneff=NULL, upperHRnoneff=NULL, stage1HR=NULL, upperHRuncPower=NULL, highHR=NULL, 
+                          alphaNoneff=0.05, alphaStage1=0.05, alphaUncPower=0.05, alphaHigh=0.05, post6moCut=26, post6moMonitor, estimand) {
   
   ## This function apply the stopping rules for nonefficacy and high efficacy monitoring.
   ## A vector of events where nonefficacy monitoring
@@ -1095,9 +1195,6 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
   ## 
   ## 'boundLabel'  - can only take on values "HighEff" or "NonEff"
   ##
-  ## 'HaHR'        - HR under alternative hypothesis (1- VE)
-  ## 'NullHR'      - HR under null hypothesis
-  ## 'alpha'       - one-sided alpha level
   ## 'post6moCut'  - cut off time (in weeks)
   ## 'estimand'    - a character string specifying the estimand of interest (can be one of "combined", "cox", and "cuminc")
   ##
@@ -1108,8 +1205,13 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
   ## check specification of bounds
   Lower <- ifelse( boundLabel=="NonEff", FALSE, TRUE )
   
-  #if (!Lower)
-  #    stop("You must specify 'lowerBounds' or 'upperBounds' (or both)\n" )
+  if (Lower){ # high efficacy monitoring
+    if (any(is.null(highHR),is.null(alphaHigh))){ stop("The arguments 'highHR' and 'alphaHigh' must be specified for high efficacy monitoring.\n") }
+  } else {    # non-efficacy monitoring
+    if (any(is.null(lowerHRnoneff),is.null(upperHRnoneff),is.null(alphaNoneff))){ stop("The arguments 'lowerHRnoneff', 'upperHRnoneff', and 'alphaNoneff' must be specified for non-efficacy monitoring.\n") }
+  }
+  
+  if (estimand=="combined" & post6moMonitor){ stop("Post-6 months monitorting for non-efficacy is not implemented for the 'combined' approach.") }
   
   ## store the length of the infections totals
   L <- length(infectionTotals)
@@ -1156,8 +1258,7 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
   #}
   ## get the number of tests specified
   nTests <- length(infectionTotals) # duplicate information: 'L' defined above the same
-  
-  
+    
   ## extract 'exit' times corresponding to the infection totals given
   ## in 'infectionTotals' 
   testTimes <- subset(eventDF, totInfec %in% infectionTotals)$exit
@@ -1171,6 +1272,7 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
   if (K == 0) {
     return( list( finished = FALSE,
                   boundHit = NA, 
+                  altDetected = NA,
                   stopTime = NA, 
                   stopInfectCnt = NA,
                   totInfecCnt = n,
@@ -1211,6 +1313,7 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
   bound <- NA
   
   nVaxInfStage1 <- NA
+  altDetected <- NA
   
   for ( i in 1:K ) {
     
@@ -1221,6 +1324,8 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
     D$event.i <- D$event & (D$exit <= t.i) # a logical vector
     D$futime.i <- pmin(D$exit, t.i) - D$entry 
     
+    # indicator of a post-6 months infection
+    D$event.i6 <- D$event.i & (D$futime.i>post6moCut)
     
     ## populate summary object with basic info
     #summObj$EstHazardRatio[i] <- hr.i
@@ -1255,11 +1360,8 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
       tbl <- c(0, 0)
       if (length(infectPost6moTbl) == 1)
         tbl[ 1 + as.numeric( names(infectPost6moTbl) ) ] <- as.numeric(infectPost6moTbl)
-      summObj$infectSplit[i] <- paste("Pl:Vx =", paste(tbl,collapse=":") )
-    }
-    
-    
-    
+      summObj$infectSplitPost6mo[i] <- paste("Pl:Vx =", paste(tbl,collapse=":") )
+    }    
     
     ## We need infections in both trt groups to create (Wald) confidence intervals for
     ## the hazard ratio and for the other ratio being used. So if we encounter a case
@@ -1289,91 +1391,77 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
     
     
     ## run cox model
-    coxPH.i <- coxph( coxFormula, data=D, init=log(NullHR)) 
+    coxPH.i <- coxph( coxFormula, data=D )
+    if (post6moMonitor){ coxPH.i6 <- coxph(Surv(futime.i,event.i6) ~ trt, data=D) }
     
     ## extract the hazard ratio for 'trt' and store         
     hr.i <- exp( coxPH.i$coef )
     summObj$EstHazardRatio[i] <- hr.i
     
-    ## 95% CI for HR
-    HRci.up <- exp(coxPH.i$coef+qnorm(0.975)*sqrt(coxPH.i$var))
-    HRci.lw <- exp(coxPH.i$coef-qnorm(0.975)*sqrt(coxPH.i$var))
-    
     if (estimand %in% c("combined", "cuminc")){
       ## calculate cumulative incidence (Fv/Fp) and its CI 
       KM <- survfit(coxFormula, data=D, error="greenwood")
       KM.sum <- summary(KM)
-      tm <- min(max(KM.sum$time[KM.sum$strata=="trt=0"]), max(KM.sum$time[KM.sum$strata=="trt=1"]))
-      
-      # CUMULATIVE INCIDENCE ESTIMATES BASED ON KAPLAN-MEIER ESTIMATES
-      #KM.sum.tm <- summary(KM, times=tm)
-      #varS.p = KM.sum.tm$std.err[KM.sum.tm$strata=="trt=0"]^2 # could be NA
-      #varS.v = KM.sum.tm$std.err[KM.sum.tm$strata=="trt=1"]^2 # could be NA
-      #
-      ### one of varS.p and varS.v might be 'NA'
-      #if (is.na(varS.p)){
-      #  tm <- KM.sum$time[KM.sum$strata=="trt=0"][length(KM.sum$time[KM.sum$strata=="trt=0"]) - 1]
-      #}
-      #if (is.na(varS.v)){
-      #  tm <- KM.sum$time[KM.sum$strata=="trt=1"][length(KM.sum$time[KM.sum$strata=="trt=1"]) - 1]
-      #}
-      #
-      #KM.sum.tm <- summary(KM, times=tm)
-      #F.v = 1-KM.sum.tm$surv[KM.sum.tm$strata=="trt=1"]
-      #F.p = 1-KM.sum.tm$surv[KM.sum.tm$strata=="trt=0"]
-      #FR.i= F.v/F.p
-      # 
-      ### CI for FR
-      #varS.p = KM.sum.tm$std.err[KM.sum.tm$strata=="trt=0"]^2
-      #varS.v = KM.sum.tm$std.err[KM.sum.tm$strata=="trt=1"]^2
-      #
-      #varlogFR = varS.v/(F.v^2) + varS.p/(F.p^2)
-      # END OF CUMULATIVE INCIDENCE ESTIMATES BASED ON KAPLAN-MEIER ESTIMATES
-      
+            
       # Nelson-Aalen estimates
       na.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"])
       varna.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"]^2)
-      idx <- max(which(KM.sum$time[KM.sum$strata=="trt=0"]<=tm))
-      na.0 <- na.0[idx]
-      varna.0 <- varna.0[idx]
+      na.0 <- na.0[length(na.0)]
+      varna.0 <- varna.0[length(varna.0)]      
       
       na.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"])
       varna.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"]^2)
-      idx <- max(which(KM.sum$time[KM.sum$strata=="trt=1"]<=tm))
-      na.1 <- na.1[idx]
-      varna.1 <- varna.1[idx]
-      
+      na.1 <- na.1[length(na.1)]
+      varna.1 <- varna.1[length(varna.1)]
+            
       # survival estimates
       S.0 <- exp(-na.0)
-      varS.0 <- exp(-2*na.0) * varna.0
+      varS.0 <- ifelse(is.na(varna.0), NA, exp(-2*na.0) * varna.0)
       S.1 <- exp(-na.1)
-      varS.1 <- exp(-2*na.1) * varna.1
+      varS.1 <- ifelse(is.na(varna.1), NA, exp(-2*na.1) * varna.1)
       
       # cumulative incidence ratio
       F.0 <- 1 - S.0
       F.1 <- 1 - S.1
       FR.i <- F.1/F.0
-      varlogFR <- varS.1/(F.1^2) + varS.0/(F.0^2)
+      varlogFR <- ifelse(is.na(varS.0) | is.na(varS.1), NA, varS.1/(F.1^2) + varS.0/(F.0^2))
       
-      FRci.up <- exp(log(FR.i)+qnorm(0.975)*sqrt(varlogFR))
-      FRci.lw <- exp(log(FR.i)-qnorm(0.975)*sqrt(varlogFR))
       summObj$EstCumulatIncid[i] <- FR.i
+      
+      if (post6moMonitor){
+        ## calculate cumulative incidence (Fv/Fp) and its CI 
+        KM <- survfit(Surv(futime.i,event.i6) ~ trt, data=D, error="greenwood")
+        KM.sum <- summary(KM)
+                
+        # Nelson-Aalen estimates
+        na.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"])
+        varna.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"]^2)
+        na.0 <- na.0[length(na.0)]
+        varna.0 <- varna.0[length(varna.0)]      
+        
+        na.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"])
+        varna.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"]^2)
+        na.1 <- na.1[length(na.1)]
+        varna.1 <- varna.1[length(varna.1)]
+        
+        # survival estimates
+        S.0 <- exp(-na.0)
+        varS.0 <- ifelse(is.na(varna.0), NA, exp(-2*na.0) * varna.0)
+        S.1 <- exp(-na.1)
+        varS.1 <- ifelse(is.na(varna.1), NA, exp(-2*na.1) * varna.1)
+        
+        # cumulative incidence ratio
+        F.0 <- 1 - S.0
+        F.1 <- 1 - S.1
+        FR.i6 <- F.1/F.0
+        varlogFR6 <- ifelse(is.na(varS.0) | is.na(varS.1), NA, varS.1/(F.1^2) + varS.0/(F.0^2))
+      }
     }
     
-    ## Compare HR to the boundaries 
-    if ( Lower ){  ## high efficacy
-      if (estimand=="combined"){
-        if ( all( c(HRci.up, FRci.up) < highHR ) ) {
-          done <- TRUE
-          bound <- "HighEff"
-        } else {
-          if (i==K) {   ## the end of high eff monitoring
-            done = TRUE
-            bound = "notHighEff"
-          }
-        }
-      }
+    ## Compare HR (and FR) to the boundaries
+    if ( Lower ){  # high efficacy monitoring
       if (estimand=="cox"){
+        HRci.up <- exp(coxPH.i$coef+qnorm(1-alphaHigh/2)*sqrt(coxPH.i$var))        
         if ( HRci.up < highHR  ) {
           done <- TRUE
           bound <- "HighEff"
@@ -1384,7 +1472,9 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
           }
         }
       }
-      if (estimand=="cuminc"){
+      
+      if (estimand!="cox"){
+        FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)+qnorm(1-alphaHigh/2)*sqrt(varlogFR)))        
         if ( FRci.up < highHR ) {
           done <- TRUE
           bound <- "HighEff"
@@ -1395,65 +1485,101 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
           }
         }
       }
-    } else { ## check for non-efficacy
-      if (i == K && infectionTotals[i]==n ) { ##  final test using logrank test or Wald test
-        
+    } else {  # either non-efficacy monitoring or end-of-Stage 1 test for advancement into Stage 2
+      if (i == K && infectionTotals[i]==n ) { ##  test for positive efficacy at the end of Stage 1 for advancement into Stage 2      
         done <- TRUE
         nVaxInfStage1 <- sum(D$event.i[D$trt==1])
         
         if (infectionsInOnlyOneGroup==TRUE){  # if there are zero infections in the vaccine group
           bound <- "Eff"
         } else {
+          if (estimand=="cox"){ 
+            HRci.up <- exp(coxPH.i$coef+qnorm(1-alphaStage1/2)*sqrt(coxPH.i$var))            
+            bound <- ifelse(HRci.up < stage1HR, "Eff", "NonEffFinal")
+          }
+        
+          if (estimand!="cox"){ 
+            FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)+qnorm(1-alphaStage1/2)*sqrt(varlogFR)))            
+            bound <- ifelse(FRci.up < stage1HR, "Eff", "NonEffFinal")
+          }          
+        }       
+      } else {  # non-efficacy interim analysis before the end of Stage 1
+        if (post6moMonitor){  # estimand must be different from 'combined'          
+          if (estimand=="cox"){
+            HRci.lw <- exp(coxPH.i$coef-qnorm(1-alphaNoneff/2)*sqrt(coxPH.i$var))  
+            HRci.up <- exp(coxPH.i$coef+qnorm(1-alphaNoneff/2)*sqrt(coxPH.i$var))
+            HRci.lw6 <- exp(coxPH.i6$coef-qnorm(1-alphaNoneff/2)*sqrt(coxPH.i6$var))  
+            HRci.up6 <- exp(coxPH.i6$coef+qnorm(1-alphaNoneff/2)*sqrt(coxPH.i6$var))
+            if ( all(lowerHRnoneff < c(HRci.lw, HRci.lw6)) && all(upperHRnoneff < c(HRci.up, HRci.up6)) ) {
+              done <- TRUE
+              bound <- "NonEffInterim"
+            }
+          }
+          
+          if (estimand=="cuminc"){
+            FRci.lw <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)-qnorm(1-alphaNoneff/2)*sqrt(varlogFR))) 
+            FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)+qnorm(1-alphaNoneff/2)*sqrt(varlogFR)))
+            FRci.lw6 <- ifelse(is.na(varlogFR6), NA, exp(log(FR.i6)-qnorm(1-alphaNoneff/2)*sqrt(varlogFR6))) 
+            FRci.up6 <- ifelse(is.na(varlogFR6), NA, exp(log(FR.i6)+qnorm(1-alphaNoneff/2)*sqrt(varlogFR6)))
+            if ( all(lowerHRnoneff < c(FRci.lw, FRci.lw6)) && all(upperHRnoneff < c(FRci.up, FRci.up6)) ) {
+              done <- TRUE
+              bound <- "NonEffInterim"
+            }
+          }
+        } else {
+          if (estimand=="combined"){
+            HRci.lw <- exp(coxPH.i$coef-qnorm(1-alphaNoneff/2)*sqrt(coxPH.i$var))
+            HRci.up <- exp(coxPH.i$coef+qnorm(1-alphaNoneff/2)*sqrt(coxPH.i$var))
+            FRci.lw <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)-qnorm(1-alphaNoneff/2)*sqrt(varlogFR)))
+            FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)+qnorm(1-alphaNoneff/2)*sqrt(varlogFR)))          
+            if ( all( lowerHRnoneff < c(HRci.lw, FRci.lw) ) && all( upperHRnoneff < c(HRci.up, FRci.up) ) ) {
+              done <- TRUE
+              bound <- "NonEffInterim"
+            }
+          }
           
           if (estimand=="cox"){
-            logRank <- survdiff(coxFormula, data=D)
-            if (logRank$obs[2] <= logRank$exp[2]){ 
-              p.logRank <- (1-pchisq(logRank$chisq, 1))/2 
-            } else {
-              p.logRank <- 1 - (1-pchisq(logRank$chisq, 1))/2 
+            HRci.lw <- exp(coxPH.i$coef-qnorm(1-alphaNoneff/2)*sqrt(coxPH.i$var))  
+            HRci.up <- exp(coxPH.i$coef+qnorm(1-alphaNoneff/2)*sqrt(coxPH.i$var))
+            if ( lowerHRnoneff < HRci.lw && upperHRnoneff < HRci.up ) {
+              done <- TRUE
+              bound <- "NonEffInterim"
             }
-            
-            if(p.logRank < alpha && hr.i < NullHR){
-              bound <- "Eff"
-            } else {
-              bound <- "NonEffFinal"
+          }
+          
+          if (estimand=="cuminc"){
+            FRci.lw <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)-qnorm(1-alphaNoneff/2)*sqrt(varlogFR))) 
+            FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)+qnorm(1-alphaNoneff/2)*sqrt(varlogFR)))
+            if ( lowerHRnoneff < FRci.lw && upperHRnoneff < FRci.up ) {
+              done <- TRUE
+              bound <- "NonEffInterim"
             }
-          } else {
-            wald.stat <- (na.1 - na.0)/sqrt(varna.1 + varna.0)
-            wald.pval <- pnorm(wald.stat)
-            if (is.na(wald.pval)){ 
-              bound <- NA
-            } else {
-              if (wald.pval < alpha){ bound <- "Eff" } else { bound <- "NonEffFinal" }
-            }            
           }
-        }  
-      } else {  ## Not final test 
-        ## If both 95% CIs (1) lie above alternative HR (HaHR); (2) not below NullHR
-        ## then we stop for non-efficacy
-        if (estimand=="combined"){
-          if ( all( HaHR < c(HRci.lw, FRci.lw) ) && all( NullHR <= c(HRci.up, FRci.up) ) ) {
-            done <- TRUE
-            bound <- "NonEffInterim"
+        }                
+      }
+    }
+    
+    # test for design alternative
+    if (done) {  # i.e., when the trial stops
+      if (!is.null(upperHRuncPower)){
+        if (infectionsInOnlyOneGroup==TRUE){  # if there are zero infections in the vaccine group
+          altDetected <- !logical(length(upperHRuncPower))
+        } else {
+          if (estimand=="cox"){
+            HRci.up <- exp(coxPH.i$coef+qnorm(1-alphaUncPower/2)*sqrt(coxPH.i$var))            
+            altDetected <- HRci.up < upperHRuncPower
           }
-        }
-        if (estimand=="cox"){
-          if ( HaHR < HRci.lw && NullHR <= HRci.up ) {
-            done <- TRUE
-            bound <- "NonEffInterim"
-          }
-        }
-        if (estimand=="cuminc"){
-          if ( HaHR < FRci.lw && NullHR <= FRci.up ) {
-            done <- TRUE
-            bound <- "NonEffInterim"
+          
+          if (estimand!="cox"){
+            FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)+qnorm(1-alphaUncPower/2)*sqrt(varlogFR)))            
+            altDetected <- FRci.up < upperHRuncPower
           }
         }
       }
     }
+    
     if (done) break
-  }
-  
+  }  
   
   if (done) {
     ## Time since the first subject was enrolled and number of infections at which we stopped
@@ -1472,10 +1598,20 @@ applyStopRules<- function(d, infectionTotals, boundLabel="highEff",
   ## subset summary object to just rows for tests done
   summObjsub <- summObj[1:i, ]
   
-  if(estimand!="cuminc" & !infectionsInOnlyOneGroup){ CI.out <- c(HRci.lw,HRci.up) } else { CI.out <- NA }
+  if(estimand!="cuminc" & !infectionsInOnlyOneGroup & !is.na(bound)){ 
+    if (bound=="NonEffInterim"){ alpha <- alphaNoneff }
+    if (bound %in% c("Eff","NonEffFinal")){ alpha <- alphaStage1 }
+    if (bound %in% c("HighEff","notHighEff")){ alpha <- alphaHigh }
+    HRci.lw <- exp(coxPH.i$coef-qnorm(1-alpha/2)*sqrt(coxPH.i$var))  
+    HRci.up <- exp(coxPH.i$coef+qnorm(1-alpha/2)*sqrt(coxPH.i$var))
+    CI.out <- c(HRci.lw,HRci.up) 
+  } else { 
+    CI.out <- NA 
+  }
   
   return( list( finished = done,
                 boundHit = bound, 
+                altDetected = altDetected,
                 stopTime = stopTime, 
                 stopInfectCnt = Ninfec,
                 totInfecCnt = n,
@@ -1794,12 +1930,20 @@ fileNameFunc <- function( p, N, null.p)
   paste0("harmBounds_N=", N, "_alphaPerTest=", p, "_pVacc=", null.p, ".csv")
 }
 
+getAlphaPerTest <- function(harmMonitorRange, null.p){
+  getCumAlpha <- function(alphaPerTest, harmMonitorRange, null.p){ 
+    harmBounds <- getHarmBound(N=harmMonitorRange[2], per.test=alphaPerTest, harmMonitorRange=harmMonitorRange, null.p=null.p) 
+    return(harmBounds$cumStopProb[NROW(harmBounds)] - 0.05)
+  }
+  return(uniroot(getCumAlpha, c(0,0.05), harmMonitorRange=harmMonitorRange, null.p=null.p)$root)
+}
 
 getHarmBound <- function(N,  ##Total number of infections desired for harm monitoring
                          per.test, ## value for per-test alpha level
                          harmMonitorRange,
                          null.p,
-                         dataDir = NULL){
+                         dataDir = NULL,
+                         verbose = TRUE){
   ## Note: 
   ##   'null.p' = the probability that an infection occurs in a vaccinee, under the null 
   ##              hypothesis that infection is equally likely in vaccinees and placebo
@@ -1907,9 +2051,9 @@ getHarmBound <- function(N,  ##Total number of infections desired for harm monit
   harmBounds =  boundOut
   names(harmBounds)[1:3]=c("N", "V", "P") 
   if (!is.null(dataDir)){
-    fileName <- fileNameFunc(round(per.test, 2), N, round(null.p, 2))
+    fileName <- fileNameFunc(round(per.test, 4), N, round(null.p, 2))
     write.csv(harmBounds, file.path(dataDir, fileName), row.names=FALSE)
-    cat("Potential-harm stopping boundaries saved in:\n", file.path(dataDir, fileName), "\n\n")
+    if (verbose){ cat("Potential-harm stopping boundaries saved in:\n", file.path(dataDir, fileName), "\n\n") }
   }    
   return(harmBounds)  
 }
@@ -1929,8 +2073,10 @@ simTrial <- function(N,
                     missVaccProb = NULL,
                     VEcutoffWeek,
                     nTrials,
+                    blockSize = NULL,
                     stage1,
                     saveDir = NULL,
+                    verbose = TRUE,
                     randomSeed = NULL){
 VEmodel <- match.arg(VEmodel)
   
@@ -1962,6 +2108,12 @@ enrollRate <- Nppt/(enrollPartialRelRate * enrollPartial + enrollPeriod - enroll
 
 ## 'trtAssgnProbs' contains treatment assignment probabilities
 trtAssgnProbs <- structure(N/Nppt, names=trtArms)
+
+## specify block size if not provided by user
+if ( is.null(blockSize) ){
+  ## gets the minimum valid blockSize within the interval given by 'range' [10, Infinty)
+  blockSize <- getBlockSize( N, range=c(10,Inf) )
+}
 
 ## The rates in 'parSet' are "base rates" that will be 
 ## modified with "relative rates" for specific groups and/or time periods.
@@ -2091,6 +2243,7 @@ for ( i in 1:nTrials )
     EDI.i <- simFullEDIdata(
                   rateParams = rates,
                   trtAssignProb = trtAssgnProbs,
+                  blockSize = blockSize,
                   infecRates = infecRateTbl,
                   protocolVisits = visitSchedule,
                   enrollPeriod = enrollSchedule,
@@ -2156,6 +2309,7 @@ trialObj <- list( trialData = trialList,
                   N = Nppt,
                   nArms = nArms,
                   trtAssgnProbs = trtAssgnProbs,
+                  blockSize = blockSize,
                   fuTime = fuTime,
                   rates = parSet,
                   enrollSchedule = enrollSchedule,
@@ -2171,7 +2325,7 @@ trialObj <- list( trialData = trialList,
   if (!is.null(saveDir)){
     saveFile <- paste("simTrial_nPlac=", N[1], "_nVacc=", paste(N[-1], collapse="_"), "_aveVE=", paste(round(aveVE,2), collapse="_"), "_infRate=", infecRate,".RData", sep="")
     save(trialObj, file=file.path(saveDir, saveFile))
-    cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n")
+    if (verbose){ cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n") }
   } else {
     return( trialObj )
   }
@@ -2251,25 +2405,35 @@ monitorTrial = function(dataFile,
                         stage1,
                         stage2,
                         harmMonitorRange,
-                        alphaPerTest,                        
+                        alphaPerTest=NULL,                        
                         minCnt,
                         minPct,
                         week1,
                         minCnt2,
                         week2,
                         nonEffInterval,
-                        nullVE,
-                        altVE,
-                        highVE,
-                        alpha,
+                        lowerVEnoneff,    # lower confidence bound to be below 'lowerVEnoneff' to meet criterion 1 for declaring non-efficacy
+                        upperVEnoneff,    # upper confidence bound to be below 'upperVEnoneff' to meet criterion 2 for declaring non-efficacy
+                        highVE,           # lower confidence bound to be above 'highVE' for declaring high efficacy
+                        stage1VE,         # lower confidence bound to be above 'stage1VE' for advancing into Stage 2
+                        lowerVEuncPower=NULL,  # lower confidence bound to be above 'lowerVEuncPower' for rejecting H0: VE<=lowerVEuncPower*100%                        
+                        alphaNoneff,      # One minus confidence level of 2-sided CI for non-efficacy monitoring
+                        alphaHigh,        # One minus confidence level of 2-sided CI for high efficacy monitoring
+                        alphaStage1,      # One minus confidence level of 2-sided CI for testing whether an arm advances into Stage 2
+                        alphaUncPower=NULL, # One minus confidence level of 2-sided CI for unconditional power to reject H0: VE<=lowerVEuncPower*100%                        
                         estimand=c("combined", "cox", "cuminc"),
+                        post6moMonitor = FALSE,
                         VEcutoffWeek,
-                        saveDir = NULL){
+                        saveDir = NULL,
+                        verbose = TRUE){
   estimand <- match.arg(estimand)
-      
-  nullHR = 1-nullVE
-  altHR = 1-altVE
-  highHR <- 1-highVE  
+  
+  upperHRnoneff <- 1 - lowerVEnoneff
+  lowerHRnoneff <- 1 - upperVEnoneff
+  stage1HR <- 1 - stage1VE
+  upperHRuncPower <- NULL
+  if (!is.null(lowerVEuncPower)){ upperHRuncPower <- 1 - lowerVEuncPower }
+  highHR <- 1 - highVE
   
   if (!is.null(saveDir)){
     ## load in RData object (a list named 'trialObj' )
@@ -2295,8 +2459,9 @@ monitorTrial = function(dataFile,
   names(null.p) <- NULL
   
   # calculate stopping boundaries for harm
+  if (is.null(alphaPerTest)){ alphaPerTest <- getAlphaPerTest(harmMonitorRange, null.p) }
   harmBounds <- getHarmBound(N=harmMonitorRange[2], per.test=alphaPerTest, harmMonitorRange=harmMonitorRange,
-                             null.p=null.p, dataDir=saveDir)
+                             null.p=null.p, dataDir=saveDir, verbose=verbose)
   
   ## creates a list of length 'nTrials' each element of which is a list of 
   ## length 'nTrtArms'
@@ -2428,11 +2593,18 @@ monitorTrial = function(dataFile,
         ## do high eff monitoring 
         # if ( nrow(highEffBounds)!= 0 ) {  
         if ( any(highN < harmInfecTot) ) {
-          highEffRes <- applyStopRules(
-            datIH.j,
-            infectionTotals = highN[highN < harmInfecTot],
-            boundLabel = "HighEff", NullHR=nullHR, 
-            HaHR = altHR, highHR = highHR, alpha=alpha, post6moCut=VEcutoffWeek, estimand=estimand ) 
+          highEffRes <- applyStopRules(datIH.j,
+                                       infectionTotals = highN[highN < harmInfecTot],
+                                       boundLabel = "HighEff",
+                                       stage1HR = stage1HR,
+                                       upperHRuncPower = upperHRuncPower,
+                                       highHR = highHR,
+                                       alphaStage1 = alphaStage1,
+                                       alphaUncPower = alphaUncPower,
+                                       alphaHigh = alphaHigh, 
+                                       post6moCut=VEcutoffWeek, 
+                                       post6moMonitor = post6moMonitor,
+                                       estimand=estimand) 
           
           if ( isTRUE(highEffRes$boundHit == "HighEff") ) {
             stop("We Hit both High Eff and harm bounds! ",
@@ -2451,12 +2623,18 @@ monitorTrial = function(dataFile,
       ## We only reach here if no harm bounds were hit
       
       # if ( nrow(highEffBounds)!= 0 ) { 
-      highEffRes <- applyStopRules( 
-        datIH.j,
-        infectionTotals = highN,
-        boundLabel = "HighEff",
-        NullHR=nullHR, 
-        HaHR = altHR, highHR = highHR, alpha=alpha, post6moCut=VEcutoffWeek, estimand=estimand)
+      highEffRes <- applyStopRules(datIH.j,
+                                   infectionTotals = highN,
+                                   boundLabel = "HighEff",
+                                   stage1HR = stage1HR,
+                                   upperHRuncPower = upperHRuncPower,
+                                   highHR = highHR, 
+                                   alphaStage1 = alphaStage1,
+                                   alphaUncPower = alphaUncPower,
+                                   alphaHigh=alphaHigh, 
+                                   post6moCut=VEcutoffWeek,
+                                   post6moMonitor = post6moMonitor,
+                                   estimand=estimand)
       isHighEff <- highEffRes$boundHit == "HighEff"          
       if (is.na(isHighEff)){ isHighEff <- FALSE }      
       # } 
@@ -2476,7 +2654,16 @@ monitorTrial = function(dataFile,
           futRes <- applyStopRules(datI.j,
                                    infectionTotals = seq(N1, heCnt, by =nonEffInterval),             
                                    boundLabel = "NonEff",
-                                   HaHR = altHR, NullHR=nullHR, alpha=alpha, post6moCut=VEcutoffWeek, estimand=estimand) 
+                                   lowerHRnoneff = lowerHRnoneff, 
+                                   upperHRnoneff = upperHRnoneff, 
+                                   stage1HR = stage1HR,
+                                   upperHRuncPower = upperHRuncPower,
+                                   alphaNoneff = alphaNoneff, 
+                                   alphaStage1 = alphaStage1,
+                                   alphaUncPower = alphaUncPower,
+                                   post6moCut=VEcutoffWeek, 
+                                   post6moMonitor = post6moMonitor,
+                                   estimand=estimand)           
           if (futRes$finished) {
             out[[i]][[j]] <- futRes
             next
@@ -2496,7 +2683,16 @@ monitorTrial = function(dataFile,
       futRes <- applyStopRules(datI.j,
                                infectionTotals = nonEffInfec,             
                                boundLabel = "NonEff",
-                               HaHR = altHR, NullHR=nullHR, alpha=alpha, post6moCut=VEcutoffWeek, estimand=estimand) 
+                               lowerHRnoneff = lowerHRnoneff, 
+                               upperHRnoneff = upperHRnoneff,
+                               stage1HR = stage1HR,
+                               upperHRuncPower = upperHRuncPower,
+                               alphaNoneff = alphaNoneff,
+                               alphaStage1 = alphaStage1,
+                               alphaUncPower = alphaUncPower,
+                               post6moCut=VEcutoffWeek,
+                               post6moMonitor = post6moMonitor,
+                               estimand=estimand) 
       out[[i]][[j]] <- futRes
       
       out[[i]][[j]]$firstNonEffCnt <- N1
@@ -2505,20 +2701,29 @@ monitorTrial = function(dataFile,
       
       ## add 'lastExitTime' to the object, in case we have efficacy and
       ## the trial continues until the last person in the arm exits the study
-      out[[i]][[j]]$lastExitTime <- max( datI.j$exitUncens, na.rm=TRUE ) - minEnrollTime       
+      out[[i]][[j]]$lastExitTime <- max( datI.j$exitUncens, na.rm=TRUE ) - minEnrollTime
+      
+      out[[i]][[j]]$altTest <- !is.null(lowerVEuncPower)
     }
   }
   
-  for (i in 1:nTrtArms) {
-    v <- unlist( lapply( out, function(x) x[[i]]$boundHit ) )
-    print( round(table(v, exclude=NULL)/nTrials, 2) )
-  }
+  if (verbose){
+    for (i in 1:nTrtArms) {
+      cat("Probabilities of reaching each possible conclusion:\n")
+      print(round(table(unlist( lapply( out, function(x) x[[i]]$boundHit ) ), useNA="ifany")/nTrials, 2))
+      
+      if (!is.null(lowerVEuncPower)){
+        designPower <- colSums(do.call("rbind",lapply(out, function(oneTrial){ oneTrial[[i]]$altDetected })), na.rm=TRUE)/nTrials
+        cat("\nUnconditional power to reject the specified null hypotheses =",round(designPower, 2),"\n\n", sep=" ")
+      }    
+    }
+  }  
   
   ## save monitoring output
   if (!is.null(saveDir)){
     saveFile <- paste("monitorTrial", substr(dataFile, 9, nchar(dataFile)-6), "_", estimand, ".RData", sep="")
     save(out, file = file.path(saveDir, saveFile) )
-    cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n")
+    if (verbose){ cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n") }
   } else {
     return(out)
   }  
@@ -2571,7 +2776,8 @@ finalLogRankTest = function(datI, stage =78, NullHR, alpha=0.025) {
    list(bound=bound, VE = 1-hr.i)
 }
 
-finalCumHazWaldTest <- function(datI, stage, alpha){
+testVE <- function(datI, lowerVE, stage, alpha){
+  upperFR <- 1-lowerVE
   ## variables for cumulative hazard-based Wald test, censor at 'stage' 
   ## which can be stage 1 or 2 
   datI$futime <- datI$exit - datI$entry
@@ -2585,29 +2791,32 @@ finalCumHazWaldTest <- function(datI, stage, alpha){
   
   KM <- survfit(Surv(futime, event) ~ trt, data=datI, error="greenwood")
   KM.sum <- summary(KM)
-  tm <- min(max(KM.sum$time[KM.sum$strata=="trt=0"]), max(KM.sum$time[KM.sum$strata=="trt=1"]))
   # Nelson-Aalen estimates
   na.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"])
   varna.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"]^2)
-  idx <- max(which(KM.sum$time[KM.sum$strata=="trt=0"]<=tm))
-  na.0 <- na.0[idx]
-  varna.0 <- varna.0[idx]        
+  na.0 <- na.0[length(na.0)]
+  varna.0 <- varna.0[length(varna.0)]        
   na.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"])
   varna.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"]^2)
-  idx <- max(which(KM.sum$time[KM.sum$strata=="trt=1"]<=tm))
-  na.1 <- na.1[idx]
-  varna.1 <- varna.1[idx]            
-  # cumulative incidence functions
-  F.0 <- 1 - exp(-na.0)
-  F.1 <- 1 - exp(-na.1)
-  # VE(0-stage) estimate
-  VE <- 1 - F.1/F.0
-  # Wald statistic based on the difference in the Nelson-Aalen estimates
-  wald.stat <- (na.1 - na.0)/sqrt(varna.1 + varna.0)
-  wald.pval <- pnorm(wald.stat)
-  bound <- ifelse(wald.pval < alpha, "Eff", "nonEff")  
+  na.1 <- na.1[length(na.1)]
+  varna.1 <- varna.1[length(varna.1)]
   
-  return(list(bound=bound, VE=VE))
+  # survival estimates
+  S.0 <- exp(-na.0)
+  varS.0 <- ifelse(is.na(varna.0), NA, exp(-2*na.0) * varna.0)
+  S.1 <- exp(-na.1)
+  varS.1 <- ifelse(is.na(varna.1), NA, exp(-2*na.1) * varna.1)
+  
+  # cumulative incidence ratio
+  F.0 <- 1 - S.0
+  F.1 <- 1 - S.1
+  FR <- F.1/F.0
+  varlogFR <- ifelse(is.na(varS.0) | is.na(varS.1), NA, varS.1/(F.1^2) + varS.0/(F.0^2))
+    
+  FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR)+qnorm(1-alpha/2)*sqrt(varlogFR)))
+  bound <- ifelse(FRci.up < upperFR, "Eff", "nonEff")  
+  
+  return(list(bound=bound, VE=1-FR))
 }
 
 ## This function calculates the probability of stopping for each bound for each arm
@@ -2694,7 +2903,8 @@ censTrial <- function(dataFile,
                       monitorFile,
                       stage1,
                       stage2,
-                      saveDir = NULL){
+                      saveDir = NULL,
+                      verbose = TRUE){
                      
   if (!is.null(saveDir)){
     ## load the trial data in RData object (a list named 'trialObj' )
@@ -2809,7 +3019,7 @@ censTrial <- function(dataFile,
     saveFile <- paste("trialDataCens", substr(monitorFile, 13, nchar(monitorFile)), sep="")
     ## save trial output and info on rates used
     save(trialListCensor, file=file.path(saveDir, saveFile) )
-    cat("Trial data with correct censoring saved in:\n", file.path(saveDir, saveFile), "\n\n")
+    if (verbose){ cat("Trial data with correct censoring saved in:\n", file.path(saveDir, saveFile), "\n\n") }
   } else {
     return(trialListCensor)
   }  
@@ -2820,10 +3030,12 @@ rankTrial <- function(censFile,
                       idxHighestVE,
                       headHead=NULL,
                       poolHead=NULL,
+                      lowerVE,
                       stage1,
                       stage2,
                       alpha,
-                      saveDir = NULL){                 
+                      saveDir = NULL,
+                      verbose = TRUE){                 
   
   if (!is.null(saveDir)){
     ## load the trial data in RData object (a list named 'trialObj' )
@@ -2874,15 +3086,15 @@ rankTrial <- function(censFile,
     ## now calculate power for rank and select
     for (j in 1:nTrtArms){
       ## extract data for the j-th trt arm & placebo
-      testData = subset(datI, trt %in% c(0, j)) 
+      testData = subset(datI, trt %in% c(0, j))
       
       ## power for stage 1
-      bnd = finalCumHazWaldTest(datI=testData, stage =stage1, alpha=alpha)
+      bnd = testVE(datI=testData, lowerVE=lowerVE, stage =stage1, alpha=alpha)
       VE.I[j, 1] = bnd$VE
       test.I[j, 1] = bnd$bound
       
       ## power for stage 2
-      bnd = finalCumHazWaldTest(datI=testData, stage =stage2, alpha=alpha)
+      bnd = testVE(datI=testData, lowerVE=lowerVE, stage =stage2, alpha=alpha)
       VE.I[j, 2] = bnd$VE
       test.I[j, 2] = bnd$bound
     }
@@ -2896,13 +3108,13 @@ rankTrial <- function(censFile,
     
     if (!is.null(headHead)){  
       # head-to-head comparison of individual vaccine arms at 18 and 36 months
-      pw = headWaldTest(datI, headHead, stage1, stage2, alpha)
+      pw = headTestVE(datI, headHead, stage1, stage2, alpha)
       headHeadPw = headHeadPw + pw  # counts of detected relative efficacy for each comparison            
     }    
     
     if (!is.null(poolHead)) {
       # head-to-head comparison of pooled vaccine arms at 18 and 36 months
-      pw = headWaldTest(datI, poolHead, stage1, stage2, alpha)
+      pw = headTestVE(datI, poolHead, stage1, stage2, alpha)
       poolHeadPw = poolHeadPw + pw   
       
       # ranking and selection for pooled vaccine arms
@@ -2936,12 +3148,12 @@ rankTrial <- function(censFile,
           testData = subset(datI, trt %in% c(0, j)) 
           
           ## power for stage 1
-          bnd = finalCumHazWaldTest(datI=testData, stage=stage1, alpha=alpha)
+          bnd = testVE(datI=testData, lowerVE=lowerVE, stage=stage1, alpha=alpha)
           VE.I[j, 1] = bnd$VE
           test.I[j, 1] = bnd$bound
           
           ## power for stage 2
-          bnd = finalCumHazWaldTest(datI=testData, stage=stage2, alpha=alpha)
+          bnd = testVE(datI=testData, lowerVE=lowerVE, stage=stage2, alpha=alpha)
           VE.I[j, 2] = bnd$VE
           test.I[j, 2] = bnd$bound
         }
@@ -2966,7 +3178,7 @@ rankTrial <- function(censFile,
   if (!is.null(saveDir)){
     saveFile <- paste0("rankSelectPwr",substr(censFile, 14, nchar(censFile)))
     save(out, file = file.path(saveDir, saveFile) )
-    cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n")
+    if (verbose){ cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n") }
   } else {
     return(out)
   }  
@@ -3005,7 +3217,7 @@ headHeadTest = function(datI, headHeadInd, stage1, stage2, nullHR, alpha=0.025) 
   headHeadPw
 }
 
-headWaldTest <- function(datI, headHeadInd, stage1, stage2, alpha=0.025){
+headTestVE <- function(datI, headHeadInd, stage1, stage2, alpha){
   ## a matrix to store power for head to head comparison 
   ## column 1 = power for VE(0-18), column 2 = power for VE(0-36)
   headHeadPw = matrix(0, nrow=NROW(headHeadInd), ncol=2)
@@ -3028,14 +3240,14 @@ headWaldTest <- function(datI, headHeadInd, stage1, stage2, alpha=0.025){
     # head-to-head power = the 1-sided head-to-head test rejects; AND the superior arm passes 
     # Stage 1 with VE(0-stage1) > 0%
     ## relative VE(0-stage1)    
-    bndRel <- finalCumHazWaldTest(datI=testDataRel, stage=stage1, alpha=alpha)
+    bndRel <- testVE(datI=testDataRel, lowerVE=0, stage=stage1, alpha=alpha)
     ## VE(0-stage1) of the superior treatment
-    bnd <- finalCumHazWaldTest(datI=testData, stage=stage1, alpha=alpha)    
+    bnd <- testVE(datI=testData, lowerVE=0, stage=stage1, alpha=alpha)    
     if (bndRel$bound =="Eff" & bnd$bound=="Eff"){ headHeadPw[h, 1] = 1 }
     
     ## power for stage 2
-    bndRel <- finalCumHazWaldTest(datI=testDataRel, stage=stage2, alpha=alpha)
-    bnd <- finalCumHazWaldTest(datI=testData, stage=stage2, alpha=alpha)    
+    bndRel <- testVE(datI=testDataRel, lowerVE=0, stage=stage2, alpha=alpha)
+    bnd <- testVE(datI=testData, lowerVE=0, stage=stage2, alpha=alpha)    
     if (bndRel$bound =="Eff" & bnd$bound=="Eff"){ headHeadPw[h, 2] = 1 }
   }
   return(headHeadPw)
@@ -3065,7 +3277,8 @@ buildBounds = function(nInfec, highEffBounds) {
    list(highEffBounds=highEffBounds)            
 }
 
-VEpowerPP <- function(dataList, VEcutoffWeek, stage1, alpha, outName=NULL, saveDir=NULL){
+VEpowerPP <- function(dataList, lowerVEuncPower, alphaUncPower, VEcutoffWeek, stage1, outName=NULL, saveDir=NULL, verbose=TRUE){
+  upperFRuncPower <- 1-lowerVEuncPower
   # output list (for each censTrial output object) of lists with components 'VE' and 'VEpwPP'
   pwList <- as.list(NULL)
   for (k in 1:length(dataList)){
@@ -3086,13 +3299,20 @@ VEpowerPP <- function(dataList, VEcutoffWeek, stage1, alpha, outName=NULL, saveD
     for (i in 1:nTrials){
       dataI <- dataList[[k]][[i]]
       dataI$futime <- dataI$exit - dataI$entry
-      # restrict to subjects with follow-up time exceeding 'VEcutoffWeek' weeks (per-protocol criterion 1)
-      dataI <- subset(dataI, futime > VEcutoffWeek)
-      # censor all subjects at the Week 'stage1' visit
-      dataI$event <- dataI$event == 1 & (dataI$futime <= stage1)
+      # count only infections between VEcutoffWeek and the end of Stage 1
+      dataI$event <- dataI$event==1 & dataI$futime>VEcutoffWeek & dataI$futime<=stage1
+      # censor everyone at the end of Stage 1
       dataI$futime <- pmin(dataI$futime, stage1)
-      # shift the time origin to the Week 'VEcutoffWeek' visit
-      dataI$futime <- dataI$futime - VEcutoffWeek      
+
+      # AN ALTERNATIVE WAY TO COMPUTE PER-PROTOCOL VE      
+#       # restrict to subjects with follow-up time exceeding 'VEcutoffWeek' weeks (per-protocol criterion 1)
+#       dataI <- subset(dataI, futime > VEcutoffWeek)
+#       # censor all subjects at the Week 'stage1' visit
+#       dataI$event <- dataI$event == 1 & (dataI$futime <= stage1)
+#       dataI$futime <- pmin(dataI$futime, stage1)
+#       # shift the time origin to the Week 'VEcutoffWeek' visit
+#       dataI$futime <- dataI$futime - VEcutoffWeek      
+      
       for (j in 1:nPPcohorts){
         # restrict to subjects with non-missing vaccinations (per-protocol criterion 2)
         dataIj <- dataI[dataI[[ppnames[j]]]==1,]
@@ -3109,39 +3329,49 @@ VEpowerPP <- function(dataList, VEcutoffWeek, stage1, alpha, outName=NULL, saveD
           } else {
             KM <- survfit(Surv(futime, event) ~ trt, data=dataIj, error="greenwood")
             KM.sum <- summary(KM)
-            tm <- min(max(KM.sum$time[KM.sum$strata=="trt=0"]), max(KM.sum$time[KM.sum$strata=="trt=1"]))
+            
             # Nelson-Aalen estimates
             na.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"])
             varna.0 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=0"]/KM.sum$n.risk[KM.sum$strata=="trt=0"]^2)
-            idx <- max(which(KM.sum$time[KM.sum$strata=="trt=0"]<=tm))
-            na.0 <- na.0[idx]
-            varna.0 <- varna.0[idx]        
+            na.0 <- na.0[length(na.0)]
+            varna.0 <- varna.0[length(varna.0)]
+            
             na.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"])
             varna.1 <- cumsum(KM.sum$n.event[KM.sum$strata=="trt=1"]/KM.sum$n.risk[KM.sum$strata=="trt=1"]^2)
-            idx <- max(which(KM.sum$time[KM.sum$strata=="trt=1"]<=tm))
-            na.1 <- na.1[idx]
-            varna.1 <- varna.1[idx]            
-            # cumulative incidence functions
-            F.0 <- 1 - exp(-na.0)
-            F.1 <- 1 - exp(-na.1)
-            # VE(6.5-18) estimate
-            VE[i,j] <- 1 - F.1/F.0
-            # Wald statistic based on the difference in the Nelson-Aalen estimates
-            wald.stat <- (na.1 - na.0)/sqrt(varna.1 + varna.0)
-            wald.pval <- pnorm(wald.stat)
-            VEpwPP[i,j] <- ifelse(wald.pval < alpha, 1, 0)
+            na.1 <- na.1[length(na.1)]
+            varna.1 <- varna.1[length(varna.1)]
+            
+            # survival estimates
+            S.0 <- exp(-na.0)
+            varS.0 <- ifelse(is.na(varna.0), NA, exp(-2*na.0) * varna.0)
+            S.1 <- exp(-na.1)
+            varS.1 <- ifelse(is.na(varna.1), NA, exp(-2*na.1) * varna.1)
+            
+            # cumulative incidence ratio
+            F.0 <- 1 - S.0
+            F.1 <- 1 - S.1
+            FR.i <- F.1/F.0
+            varlogFR <- ifelse(is.na(varS.0) | is.na(varS.1), NA, varS.1/(F.1^2) + varS.0/(F.0^2))
+            
+            # VE(6.5-stage1) estimate
+            VE[i,j] <- 1 - FR.i
+            
+            # 1-sided test of null hypothesis VE(6.5-stage1)<=lowerVEuncPower
+            FRci.up <- ifelse(is.na(varlogFR), NA, exp(log(FR.i)+qnorm(1-alphaUncPower/2)*sqrt(varlogFR)))
+            # if the upper bound of the CI for the cumulative incidence ratio lies below 'upperFRuncPower', reject H0
+            VEpwPP[i,j] <- ifelse(FRci.up < upperFRuncPower, 1, 0)            
           }          
         }        
       }
     }
     VE <- apply(VE, 2, mean, na.rm=TRUE)
     VEpwPP <- apply(VEpwPP, 2, mean, na.rm=TRUE)
-    pwList[[k]] <- list(VE=VE, VEpwPP=VEpwPP)
+    pwList[[k]] <- list(VE=VE, VEpwPP=VEpwPP)    
   }
   if (!is.null(saveDir)){
     saveFile <- ifelse(is.null(outName), "VEpwPP.RData", outName)
     save(pwList, file=file.path(saveDir, saveFile))
-    cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n")
+    if (verbose){ cat("Output saved in:\n", file.path(saveDir, saveFile), "\n\n") }
   } else {
     return(pwList)
   }  

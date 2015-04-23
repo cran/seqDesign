@@ -10,8 +10,8 @@ Simulation of Multi-Arm Randomized Phase IIb/III  Efficacy Trials with Time-to-E
 simTrial(N, aveVE, VEmodel = c("half", "constant"), vePeriods, 
          enrollPeriod, enrollPartial, enrollPartialRelRate, 
          dropoutRate, infecRate, fuTime, visitSchedule, 
-         missVaccProb = NULL, VEcutoffWeek, nTrials, stage1, 
-         saveDir = NULL, randomSeed = NULL)
+         missVaccProb = NULL, VEcutoffWeek, nTrials, blockSize = NULL,
+         stage1, saveDir = NULL, verbose = TRUE, randomSeed = NULL)
 }
 \arguments{
   \item{N}{a numeric vector specifying the numbers of enrolled trial participants per treatment arm. The length of \code{N} equals the total number of treatment arms, and the first component of \code{N} represents the control arm.}
@@ -28,8 +28,10 @@ simTrial(N, aveVE, VEmodel = c("half", "constant"), vePeriods,
   \item{missVaccProb}{a numeric vector with conditional probabilities of having missed a vaccination given the follow-up time exceeds \code{VEcutoffWeek} weeks. For each component, a separate per-protocol indicator is generated. Each per-protocol cohort includes subjects with (i) a non-missing vaccination, and (ii) follow-up time exceeding \code{VEcutoffWeek} weeks. If \code{NULL}, no per-protocol indicators are included.}
   \item{VEcutoffWeek}{a time cut-off (in weeks); the follow-up time exceeding \code{VEcutoffWeek} weeks is required for inclusion in the per-protocol cohort}
   \item{nTrials}{the number of trials to be simulated}
+  \item{blockSize}{a constant block size to be used in permuted-block randomization. The choice of \code{blockSize} requires caution to achieve the desired balance of treatment assignments within a block.}
   \item{stage1}{the final week of stage 1 in a two-stage trial}
   \item{saveDir}{a character string specifying a path for the output directory. If supplied, the output is saved as an \code{.RData} file in the directory; otherwise the output is returned as a list.}
+  \item{verbose}{a logical value indicating whether information on the output directory and file name should be printed out (default is \code{TRUE})}
   \item{randomSeed}{sets seed of the random number generator for simulation reproducibility}
 }
 \details{
@@ -43,7 +45,7 @@ Subjects' enrollment is assumed to follow a Poisson process with a time-varying 
 
 Dropout times are assumed to follow an exponential distribution where the probability of a dropout within 1 week is equal to \code{dropoutRate}/52.
 
-Permuted-block randomization is used for assigning treatment labels. The default block size of 10 times the number of treatment arms is used.
+Permuted-block randomization is used for assigning treatment labels. If left unspecified by the user, an appropriate block size, no smaller than 10, will computed and used.  The function \code{getBlockSize} can be used to determine appropriate block sizes (see help(getBlockSize)).
 
 Infection times are generated following the VE schedule characterized by \code{aveVE}, \code{VEmodel} and \code{vePeriods}. Independent exponential times are generated within each time period of constant VE, and their minimum specifies the right-censored infection time. Exponential rates are chosen that satisfy the user-specified requirements on the treatment- and time-period-specific probabilities of an infection within 1 week (in the control arm, the infection probability within 1 week uniformly equals \code{infecRate}/52).
 
@@ -59,6 +61,7 @@ If \code{saveDir} is specified, the output list (named \code{trialObj}) is saved
 \item{N}{the total number of enrolled trial participants}
 \item{nArms}{the number of treatment arms}
 \item{trtAssgnProbs}{a numeric vector containing the treatment assignment probabilities}
+\item{blockSize}{the block size used for treatment assignment}
 \item{fuTime}{the follow-up time (in weeks) of each participant}
 \item{rates}{a list with three components: the prior weekly enrollment rate (\code{enrollment}), the prior probability of dropout within 1 week (\code{dropout}), and the prior probability of infection within 1 week (\code{infection})}
 \item{enrollSchedule}{a \code{data.frame} summarizing information on enrollment periods and corresponding relative enrollment rates (relative to the weekly "base" enrollment rate). The column names are \code{start}, \code{end}, and \code{relativeRates}.}
@@ -76,7 +79,7 @@ simData <- simTrial(N=c(1000, rep(700, 2)), aveVE=seq(0, 0.4, by=0.2),
                     infecRate=0.04, fuTime=156, 
                     visitSchedule=c(0, (13/3)*(1:4), seq(13*6/3, 156, by=13*2/3)),
                     missVaccProb=c(0,0.05,0.1,0.15), VEcutoffWeek=26, nTrials=5, 
-                    stage1=78, randomSeed=300)
+                    blockSize=30, stage1=78, randomSeed=300)
 
 ### alternatively, to save the .RData output file (no '<-' needed):
 ###
@@ -85,5 +88,5 @@ simData <- simTrial(N=c(1000, rep(700, 2)), aveVE=seq(0, 0.4, by=0.2),
 ###          enrollPartialRelRate=0.5, dropoutRate=0.05, infecRate=0.04, fuTime=156, 
 ###          visitSchedule=c(0, (13/3)*(1:4), seq(13*6/3, 156, by=13*2/3)), 
 ###          missVaccProb=c(0,0.05,0.1,0.15), VEcutoffWeek=26, nTrials=30, 
-###          stage1=78, saveDir="./", randomSeed=300)
+###          blockSize=30, stage1=78, saveDir="./", randomSeed=300)
 }
